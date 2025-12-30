@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router';
-import { Play, Users } from 'lucide-react';
+import { Play, Users, Github, Shield } from 'lucide-react';
 
 export function Home() {
   return (
@@ -35,9 +35,56 @@ export function Home() {
           <li>1. Host creates a quiz with questions</li>
           <li>2. Players join using a 6-digit PIN</li>
           <li>3. Answer questions as fast as possible</li>
-          <li>4. Top 3 players win!</li>
         </ol>
       </div>
+
+      {/* Open Source Footer */}
+      <footer className="mt-12 mb-8 max-w-2xl text-center space-y-6">
+        <div className="border-t border-gray-700 pt-8">
+          <p className="text-gray-300 text-lg mb-4">
+            <span className="font-semibold text-white">CF<span className="text-brand-orange">Hoot</span> is free and open source.</span>
+            <br />
+            Deploy your own instance in seconds!
+          </p>
+          
+          <a
+            href="https://deploy.workers.cloudflare.com/?url=https://github.com/leo-ars/cfhoot"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-block hover:opacity-90 transition-opacity"
+          >
+            <img
+              src="https://deploy.workers.cloudflare.com/button"
+              alt="Deploy to Cloudflare"
+              className="h-10"
+            />
+          </a>
+        </div>
+
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-4 text-sm">
+          <a
+            href="https://github.com/leo-ars/cfhoot"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 text-gray-300 hover:text-white transition-colors"
+          >
+            <Github className="w-5 h-5" />
+            <span>View on GitHub</span>
+          </a>
+          
+          <span className="hidden sm:inline text-gray-600">•</span>
+          
+          <a
+            href="https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 text-gray-300 hover:text-white transition-colors"
+          >
+            <Shield className="w-5 h-5" />
+            <span>Restrict public access with Cloudflare Access</span>
+          </a>
+        </div>
+      </footer>
     </div>
   );
 }
