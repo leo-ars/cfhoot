@@ -193,7 +193,10 @@ export class GameDurableObject extends DurableObject<Env> {
       this.send(ws, { type: 'error', message: 'Not authorized' });
       return;
     }
+    this.showPodium();
+  }
 
+  private showPodium(): void {
     this.state.phase = 'podium';
     const leaderboard = this.calculateLeaderboard();
 
@@ -287,6 +290,9 @@ export class GameDurableObject extends DurableObject<Env> {
     };
 
     this.broadcast({ type: 'answer_received', playerId: session.playerId });
+
+    // Check if all connected players have answered
+    this.checkAllPlayersAnswered();
   }
 
   private startQuestion(index: number): void {
@@ -326,6 +332,20 @@ export class GameDurableObject extends DurableObject<Env> {
     }, 1000) as unknown as number;
   }
 
+  private checkAllPlayersAnswered(): void {
+    if (this.state.phase !== 'question') return;
+
+    const currentQuestion = this.state.quiz?.questions[this.state.currentQuestionIndex];
+    if (!currentQuestion) return;
+
+    const connectedPlayers = Object.values(this.state.players).filter((p) => p.connected);
+    const allAnswered = connectedPlayers.every((p) => p.answers[currentQuestion.id]);
+
+    if (allAnswered && connectedPlayers.length > 0) {
+      this.endQuestion();
+    }
+  }
+
   private endQuestion(): void {
     if (this.timerInterval) {
       clearInterval(this.timerInterval);
@@ -352,8 +372,16 @@ export class GameDurableObject extends DurableObject<Env> {
     const scores = this.calculateLeaderboard();
     this.broadcast({ type: 'question_end', correctIndex: question.correctIndex, scores });
 
-    // Auto-show leaderboard after a delay
-    setTimeout(() => this.showLeaderboard(), 3000);
+    // Check if this was the last question
+    const isLastQuestion = this.state.currentQuestionIndex >= (this.state.quiz?.questions.length ?? 0) - 1;
+
+    if (isLastQuestion) {
+      // Skip leaderboard, go directly to podium after delay
+      setTimeout(() => this.showPodium(), 3000);
+    } else {
+      // Show leaderboard for non-final questions
+      setTimeout(() => this.showLeaderboard(), 3000);
+    }
   }
 
   private showLeaderboard(): void {

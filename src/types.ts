@@ -15,6 +15,11 @@ export interface Quiz {
   questions: Question[];
 }
 
+export interface SavedQuiz extends Quiz {
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface Player {
   id: string;
   nickname: string;

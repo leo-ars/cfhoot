@@ -1,18 +1,28 @@
 {
 	"name": "cfhoot",
-	"version": "0.0.0",
+	"version": "1.0.0",
+	"description": "A Kahoot-style real-time quiz game built on Cloudflare Workers with Durable Objects and KV",
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"deploy": "wrangler deploy",
+		"build": "vite build",
+		"deploy": "npm run build && wrangler deploy",
 		"dev": "concurrently \"wrangler dev\" \"vite --port 5173\"",
 		"dev:worker": "wrangler dev",
 		"dev:frontend": "vite",
-		"build": "vite build && wrangler deploy",
-		"build:frontend": "vite build",
 		"start": "wrangler dev",
 		"test": "vitest",
 		"cf-typegen": "wrangler types"
+	},
+	"cloudflare": {
+		"bindings": {
+			"GAME": {
+				"description": "Durable Object for managing real-time game sessions with WebSocket connections"
+			},
+			"QUIZZES": {
+				"description": "KV namespace for storing saved quizzes that can be reused across games"
+			}
+		}
 	},
 	"dependencies": {
 		"@tanstack/react-query": "^5.62.0",

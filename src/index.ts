@@ -1,4 +1,4 @@
-import type { CreateGameResponse, JoinGameResponse } from './types';
+import type { CreateGameResponse, JoinGameResponse, SavedQuiz, Quiz } from './types';
 
 export { GameDurableObject } from './game';
 
@@ -12,7 +12,7 @@ export default {
     // CORS headers
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
     };
 
@@ -97,6 +97,77 @@ async function handleApiRoute(url: URL, request: Request, env: Env): Promise<Res
 
     const response: JoinGameResponse = { gameId, success: true };
     return Response.json(response);
+  }
+
+  // GET /api/quizzes - List all saved quizzes
+  if (url.pathname === '/api/quizzes' && request.method === 'GET') {
+    const list = await env.QUIZZES.list();
+    const quizzes: SavedQuiz[] = [];
+    
+    for (const key of list.keys) {
+      const quiz = await env.QUIZZES.get<SavedQuiz>(key.name, 'json');
+      if (quiz) quizzes.push(quiz);
+    }
+    
+    // Sort by updatedAt descending
+    quizzes.sort((a, b) => b.updatedAt - a.updatedAt);
+    return Response.json(quizzes);
+  }
+
+  // POST /api/quizzes - Save a new quiz
+  if (url.pathname === '/api/quizzes' && request.method === 'POST') {
+    const quiz = (await request.json()) as Quiz;
+    const now = Date.now();
+    
+    const savedQuiz: SavedQuiz = {
+      ...quiz,
+      id: quiz.id || crypto.randomUUID(),
+      createdAt: now,
+      updatedAt: now,
+    };
+    
+    await env.QUIZZES.put(savedQuiz.id, JSON.stringify(savedQuiz));
+    return Response.json(savedQuiz, { status: 201 });
+  }
+
+  // GET /api/quizzes/:id - Get a saved quiz
+  if (url.pathname.match(/^\/api\/quizzes\/[^/]+$/) && request.method === 'GET') {
+    const quizId = url.pathname.split('/')[3];
+    const quiz = await env.QUIZZES.get<SavedQuiz>(quizId, 'json');
+    
+    if (!quiz) {
+      return Response.json({ error: 'Quiz not found' }, { status: 404 });
+    }
+    return Response.json(quiz);
+  }
+
+  // PUT /api/quizzes/:id - Update a saved quiz
+  if (url.pathname.match(/^\/api\/quizzes\/[^/]+$/) && request.method === 'PUT') {
+    const quizId = url.pathname.split('/')[3];
+    const existing = await env.QUIZZES.get<SavedQuiz>(quizId, 'json');
+    
+    if (!existing) {
+      return Response.json({ error: 'Quiz not found' }, { status: 404 });
+    }
+    
+    const updates = (await request.json()) as Partial<Quiz>;
+    const savedQuiz: SavedQuiz = {
+      ...existing,
+      ...updates,
+      id: quizId,
+      createdAt: existing.createdAt,
+      updatedAt: Date.now(),
+    };
+    
+    await env.QUIZZES.put(quizId, JSON.stringify(savedQuiz));
+    return Response.json(savedQuiz);
+  }
+
+  // DELETE /api/quizzes/:id - Delete a saved quiz
+  if (url.pathname.match(/^\/api\/quizzes\/[^/]+$/) && request.method === 'DELETE') {
+    const quizId = url.pathname.split('/')[3];
+    await env.QUIZZES.delete(quizId);
+    return Response.json({ success: true });
   }
 
   return new Response('Not found', { status: 404 });
