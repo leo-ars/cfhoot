@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { ArrowRight, Hash } from 'lucide-react';
 
@@ -8,16 +8,24 @@ export function PlayerJoin() {
   const [pin, setPin] = useState(search.pin || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const autoJoinAttempted = useRef(false);
 
-  async function handleJoin(e: React.FormEvent) {
-    e.preventDefault();
-    if (!pin.trim()) return;
+  // Auto-join if PIN is provided in URL (from QR code)
+  useEffect(() => {
+    if (search.pin && search.pin.length >= 6 && !autoJoinAttempted.current) {
+      autoJoinAttempted.current = true;
+      joinGame(search.pin);
+    }
+  }, [search.pin]);
+
+  async function joinGame(pinToJoin: string) {
+    if (!pinToJoin.trim()) return;
 
     setLoading(true);
     setError(null);
 
     try {
-      const response = await fetch(`/api/join/${pin}`);
+      const response = await fetch(`/api/join/${pinToJoin}`);
       const data = await response.json() as { success: boolean; gameId?: string; error?: string };
 
       if (data.success && data.gameId) {
@@ -30,6 +38,11 @@ export function PlayerJoin() {
       setError('Failed to join game');
       setLoading(false);
     }
+  }
+
+  function handleJoin(e: React.FormEvent) {
+    e.preventDefault();
+    joinGame(pin);
   }
 
   return (
