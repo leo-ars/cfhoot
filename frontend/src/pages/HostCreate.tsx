@@ -1,17 +1,21 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { Plus, Trash2, Play, ArrowLeft, Save, FolderOpen, X } from 'lucide-react';
+import { Plus, Trash2, Play, ArrowLeft, Save, Check, FileText, Edit3 } from 'lucide-react';
 import type { Question, Quiz, SavedQuiz } from '../../../src/types';
+
+type View = 'select' | 'edit';
 
 export function HostCreate() {
   const navigate = useNavigate();
+  const [view, setView] = useState<View>('select');
   const [title, setTitle] = useState('My Quiz');
   const [questions, setQuestions] = useState<Question[]>([createEmptyQuestion()]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
   const [savedQuizzes, setSavedQuizzes] = useState<SavedQuiz[]>([]);
-  const [showSavedQuizzes, setShowSavedQuizzes] = useState(false);
+  const [loadingQuizzes, setLoadingQuizzes] = useState(true);
   const [currentQuizId, setCurrentQuizId] = useState<string | null>(null);
 
   // Load saved quizzes on mount
@@ -20,6 +24,7 @@ export function HostCreate() {
   }, []);
 
   async function fetchSavedQuizzes() {
+    setLoadingQuizzes(true);
     try {
       const response = await fetch('/api/quizzes');
       if (response.ok) {
@@ -28,6 +33,8 @@ export function HostCreate() {
       }
     } catch {
       // Ignore errors - quizzes feature may not be available
+    } finally {
+      setLoadingQuizzes(false);
     }
   }
 
@@ -39,14 +46,17 @@ export function HostCreate() {
 
     setSaving(true);
     setError(null);
+    setSaveSuccess(false);
 
     try {
+      const quizId = currentQuizId || crypto.randomUUID();
       const quiz: Quiz = { 
-        id: currentQuizId || crypto.randomUUID(), 
-        title, 
+        id: quizId, 
+        title: title.trim(), 
         questions 
       };
 
+      // Always use POST for new, PUT for existing
       const method = currentQuizId ? 'PUT' : 'POST';
       const url = currentQuizId ? `/api/quizzes/${currentQuizId}` : '/api/quizzes';
 
@@ -59,22 +69,35 @@ export function HostCreate() {
       if (response.ok) {
         const saved = await response.json() as SavedQuiz;
         setCurrentQuizId(saved.id);
+        setSaveSuccess(true);
         await fetchSavedQuizzes();
+        // Clear success message after 2 seconds
+        setTimeout(() => setSaveSuccess(false), 2000);
       } else {
-        setError('Failed to save quiz');
+        const errorData = await response.text();
+        console.error('Save failed:', errorData);
+        setError('Failed to save quiz. Please try again.');
       }
-    } catch {
-      setError('Failed to save quiz');
+    } catch (err) {
+      console.error('Save error:', err);
+      setError('Failed to save quiz. Please try again.');
     } finally {
       setSaving(false);
     }
   }
 
-  function loadQuiz(quiz: SavedQuiz) {
+  function selectQuiz(quiz: SavedQuiz) {
     setTitle(quiz.title);
     setQuestions(quiz.questions);
     setCurrentQuizId(quiz.id);
-    setShowSavedQuizzes(false);
+    setView('edit');
+  }
+
+  function startNewQuiz() {
+    setTitle('My Quiz');
+    setQuestions([createEmptyQuestion()]);
+    setCurrentQuizId(null);
+    setView('edit');
   }
 
   async function deleteQuiz(quizId: string, e: React.MouseEvent) {
@@ -90,13 +113,6 @@ export function HostCreate() {
     } catch {
       // Ignore
     }
-  }
-
-  function handleNewQuiz() {
-    setTitle('My Quiz');
-    setQuestions([createEmptyQuestion()]);
-    setCurrentQuizId(null);
-    setShowSavedQuizzes(false);
   }
 
   function createEmptyQuestion(): Question {
@@ -168,76 +184,66 @@ export function HostCreate() {
     }
   }
 
-  return (
-    <div className="min-h-screen p-4 pb-24">
-      <div className="max-w-3xl mx-auto">
-        <button
-          onClick={() => navigate({ to: '/' })}
-          className="flex items-center gap-2 text-gray-400 hover:text-white mb-6"
-        >
-          <ArrowLeft className="w-5 h-5" />
-          Back
-        </button>
+  // Quiz selection screen
+  if (view === 'select') {
+    return (
+      <div className="min-h-screen p-4">
+        <div className="max-w-3xl mx-auto">
+          <button
+            onClick={() => navigate({ to: '/' })}
+            className="flex items-center gap-2 text-gray-400 hover:text-white mb-6"
+          >
+            <ArrowLeft className="w-5 h-5" />
+            Back
+          </button>
 
-        <div className="flex items-center justify-between mb-8">
-          <h1 className="text-4xl font-bold text-white">
-            {currentQuizId ? 'Edit Quiz' : 'Create Quiz'}
-          </h1>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setShowSavedQuizzes(true)}
-              className="btn bg-white/10 hover:bg-white/20 flex items-center gap-2"
-            >
-              <FolderOpen className="w-5 h-5" />
-              Load
-            </button>
-            <button
-              onClick={handleSaveQuiz}
-              disabled={saving}
-              className="btn btn-secondary flex items-center gap-2"
-            >
-              <Save className="w-5 h-5" />
-              {saving ? 'Saving...' : 'Save'}
-            </button>
-          </div>
-        </div>
+          <h1 className="text-4xl font-bold text-white mb-8">Host a Game</h1>
 
-        {/* Saved Quizzes Modal */}
-        {showSavedQuizzes && (
-          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-            <div className="card max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-2xl font-bold text-white">Saved Quizzes</h2>
-                <button
-                  onClick={() => setShowSavedQuizzes(false)}
-                  className="text-gray-400 hover:text-white"
-                >
-                  <X className="w-6 h-6" />
-                </button>
+          {/* Create New Quiz */}
+          <button
+            onClick={startNewQuiz}
+            className="w-full card mb-6 hover:bg-white/20 transition-colors text-left flex items-center gap-4"
+          >
+            <div className="w-14 h-14 rounded-xl bg-brand-orange flex items-center justify-center">
+              <Plus className="w-8 h-8 text-white" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-white">Create New Quiz</h2>
+              <p className="text-gray-400">Start from scratch with a blank quiz</p>
+            </div>
+          </button>
+
+          {/* Saved Quizzes */}
+          <div className="mb-4">
+            <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+              <FileText className="w-5 h-5" />
+              Your Saved Quizzes
+            </h2>
+
+            {loadingQuizzes ? (
+              <div className="card text-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-brand-orange mx-auto"></div>
+                <p className="text-gray-400 mt-2">Loading quizzes...</p>
               </div>
-
-              <button
-                onClick={handleNewQuiz}
-                className="w-full p-4 mb-4 border-2 border-dashed border-white/30 rounded-lg text-gray-300 hover:border-white/50 hover:text-white transition-colors flex items-center justify-center gap-2"
-              >
-                <Plus className="w-5 h-5" />
-                New Quiz
-              </button>
-
-              <div className="flex-1 overflow-y-auto space-y-2">
-                {savedQuizzes.length === 0 ? (
-                  <p className="text-gray-400 text-center py-8">No saved quizzes yet</p>
-                ) : (
-                  savedQuizzes.map((quiz) => (
-                    <div
-                      key={quiz.id}
-                      onClick={() => loadQuiz(quiz)}
-                      className={`p-4 rounded-lg cursor-pointer transition-colors flex items-center justify-between ${
-                        currentQuizId === quiz.id
-                          ? 'bg-brand-orange/20 border border-brand-orange'
-                          : 'bg-white/5 hover:bg-white/10 border border-transparent'
-                      }`}
+            ) : savedQuizzes.length === 0 ? (
+              <div className="card text-center py-8">
+                <p className="text-gray-400">No saved quizzes yet</p>
+                <p className="text-gray-500 text-sm mt-1">Create a quiz and save it to reuse later</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {savedQuizzes.map((quiz) => (
+                  <div
+                    key={quiz.id}
+                    className="card hover:bg-white/20 transition-colors flex items-center justify-between"
+                  >
+                    <button
+                      onClick={() => selectQuiz(quiz)}
+                      className="flex-1 text-left flex items-center gap-4"
                     >
+                      <div className="w-12 h-12 rounded-lg bg-brand-gold/20 flex items-center justify-center">
+                        <FileText className="w-6 h-6 text-brand-gold" />
+                      </div>
                       <div>
                         <h3 className="font-semibold text-white">{quiz.title}</h3>
                         <p className="text-sm text-gray-400">
@@ -245,19 +251,71 @@ export function HostCreate() {
                           {new Date(quiz.updatedAt).toLocaleDateString()}
                         </p>
                       </div>
+                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => selectQuiz(quiz)}
+                        className="btn bg-white/10 hover:bg-white/20 p-2"
+                        title="Edit quiz"
+                      >
+                        <Edit3 className="w-5 h-5" />
+                      </button>
                       <button
                         onClick={(e) => deleteQuiz(quiz.id, e)}
                         className="text-red-400 hover:text-red-300 p-2"
+                        title="Delete quiz"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-5 h-5" />
                       </button>
                     </div>
-                  ))
-                )}
+                  </div>
+                ))}
               </div>
-            </div>
+            )}
           </div>
-        )}
+        </div>
+      </div>
+    );
+  }
+
+  // Quiz editor view
+  return (
+    <div className="min-h-screen p-4 pb-24">
+      <div className="max-w-3xl mx-auto">
+        <button
+          onClick={() => setView('select')}
+          className="flex items-center gap-2 text-gray-400 hover:text-white mb-6"
+        >
+          <ArrowLeft className="w-5 h-5" />
+          Back to Quizzes
+        </button>
+
+        <div className="flex items-center justify-between mb-8">
+          <h1 className="text-4xl font-bold text-white">
+            {currentQuizId ? 'Edit Quiz' : 'Create Quiz'}
+          </h1>
+          <button
+            onClick={handleSaveQuiz}
+            disabled={saving}
+            className={`btn flex items-center gap-2 ${
+              saveSuccess 
+                ? 'bg-green-600 hover:bg-green-600' 
+                : 'btn-secondary'
+            }`}
+          >
+            {saveSuccess ? (
+              <>
+                <Check className="w-5 h-5" />
+                Saved!
+              </>
+            ) : (
+              <>
+                <Save className="w-5 h-5" />
+                {saving ? 'Saving...' : 'Save Quiz'}
+              </>
+            )}
+          </button>
+        </div>
 
         <div className="card mb-6">
           <label className="block text-sm font-medium text-gray-300 mb-2">Quiz Title</label>
