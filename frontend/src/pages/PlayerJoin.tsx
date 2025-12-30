@@ -4,10 +4,11 @@ import { ArrowRight, Hash } from 'lucide-react';
 
 export function PlayerJoin() {
   const navigate = useNavigate();
-  const search = useSearch({ from: '/play' }) as { pin?: string };
+  const search = useSearch({ from: '/play' }) as { pin?: string | string[] };
   
-  // Clean the PIN from URL (remove any non-digits)
-  const urlPin = search.pin?.replace(/\D/g, '') || '';
+  // Clean the PIN from URL (handle string or array, remove non-digits)
+  const rawPin = Array.isArray(search.pin) ? search.pin[0] : search.pin;
+  const urlPin = (rawPin || '').toString().replace(/\D/g, '');
   const [pin, setPin] = useState(urlPin);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
