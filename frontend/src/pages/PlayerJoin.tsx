@@ -58,9 +58,9 @@ export function PlayerJoin() {
         <div className="relative mb-4">
           <Hash className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 text-gray-400" />
           <input
-            type="text"
+            type="tel"
             inputMode="numeric"
-            pattern="[0-9]*"
+            autoComplete="one-time-code"
             value={pin}
             onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
             placeholder="Game PIN"
@@ -78,6 +78,13 @@ export function PlayerJoin() {
         <button
           type="submit"
           disabled={pin.length < 6 || loading}
+          onClick={(e) => {
+            // Fallback for mobile - trigger join directly
+            if (pin.length >= 6 && !loading) {
+              e.preventDefault();
+              joinGame(pin);
+            }
+          }}
           className="btn btn-primary w-full text-xl flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {loading ? (
