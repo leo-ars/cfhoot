@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  font-family: 'Montserrat', sans-serif;
+  background: linear-gradient(135deg, #404041 0%, #2a2a2b 100%);
+  min-height: 100vh;
+}
+
+@layer components {
+  .btn {
+    @apply px-6 py-3 rounded-lg font-bold text-white transition-all duration-200 transform hover:scale-105 active:scale-95;
+  }
+  
+  .btn-primary {
+    @apply bg-brand-orange hover:bg-orange-600;
+  }
+  
+  .btn-secondary {
+    @apply bg-brand-gold hover:bg-yellow-500 text-brand-dark;
+  }
+  
+  .btn-dark {
+    @apply bg-brand-dark hover:bg-gray-700;
+  }
+  
+  .card {
+    @apply bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-brand-orange/30;
+  }
+  
+  .answer-btn {
+    @apply w-full p-6 rounded-xl font-bold text-white text-xl transition-all duration-200 transform hover:scale-[1.02] active:scale-[0.98] flex items-center gap-4;
+  }
+}

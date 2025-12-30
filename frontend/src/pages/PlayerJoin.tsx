@@ -1,0 +1,82 @@
+import { useState } from 'react';
+import { useNavigate, useSearch } from '@tanstack/react-router';
+import { ArrowRight, Hash } from 'lucide-react';
+
+export function PlayerJoin() {
+  const navigate = useNavigate();
+  const search = useSearch({ from: '/play' }) as { pin?: string };
+  const [pin, setPin] = useState(search.pin || '');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleJoin(e: React.FormEvent) {
+    e.preventDefault();
+    if (!pin.trim()) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/join/${pin}`);
+      const data = await response.json() as { success: boolean; gameId?: string; error?: string };
+
+      if (data.success && data.gameId) {
+        navigate({ to: '/play/$gameId', params: { gameId: data.gameId } });
+      } else {
+        setError(data.error || 'Invalid PIN');
+        setLoading(false);
+      }
+    } catch {
+      setError('Failed to join game');
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center p-4">
+      <div className="text-center mb-8">
+        <h1 className="text-5xl font-extrabold text-white mb-2">
+          CF<span className="text-brand-orange">Hoot</span>
+        </h1>
+        <p className="text-gray-300">Enter game PIN to join</p>
+      </div>
+
+      <form onSubmit={handleJoin} className="card max-w-sm w-full">
+        <div className="relative mb-4">
+          <Hash className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 text-gray-400" />
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            placeholder="Game PIN"
+            className="w-full bg-white/10 border border-white/20 rounded-xl pl-12 pr-4 py-4 text-2xl text-white text-center tracking-widest placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-orange"
+            autoFocus
+          />
+        </div>
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-500/20 border border-red-500 rounded-lg text-red-300 text-center">
+            {error}
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={pin.length < 6 || loading}
+          className="btn btn-primary w-full text-xl flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {loading ? (
+            'Joining...'
+          ) : (
+            <>
+              Join Game
+              <ArrowRight className="w-5 h-5" />
+            </>
+          )}
+        </button>
+      </form>
+    </div>
+  );
+}
