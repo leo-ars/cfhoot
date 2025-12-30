@@ -2,8 +2,8 @@ import type { CreateGameResponse, JoinGameResponse, SavedQuiz, Quiz } from './ty
 
 export { GameDurableObject } from './game';
 
-// Store PIN -> GameId mapping (in-memory, reset on deploy)
-const pinToGameId = new Map<string, string>();
+// PIN prefix for KV storage
+const PIN_PREFIX = 'pin:';
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -58,8 +58,8 @@ async function handleApiRoute(url: URL, request: Request, env: Env): Promise<Res
     const pinResponse = await stub.fetch(new Request('https://internal/pin'));
     const { gamePin } = (await pinResponse.json()) as { gamePin: string };
 
-    // Store PIN mapping
-    pinToGameId.set(gamePin, gameId);
+    // Store PIN mapping in KV (expires in 24 hours)
+    await env.QUIZZES.put(`${PIN_PREFIX}${gamePin}`, gameId, { expirationTtl: 86400 });
 
     const response: CreateGameResponse = { gameId, gamePin };
     return Response.json(response, { status: 201 });
@@ -76,7 +76,7 @@ async function handleApiRoute(url: URL, request: Request, env: Env): Promise<Res
   // POST /api/join - Join game by PIN
   if (url.pathname === '/api/join' && request.method === 'POST') {
     const body = (await request.json()) as { pin: string };
-    const gameId = pinToGameId.get(body.pin);
+    const gameId = await env.QUIZZES.get(`${PIN_PREFIX}${body.pin}`);
 
     if (!gameId) {
       return Response.json({ success: false, error: 'Invalid PIN' }, { status: 404 });
@@ -89,7 +89,7 @@ async function handleApiRoute(url: URL, request: Request, env: Env): Promise<Res
   // GET /api/join/:pin - Join game by PIN (GET version)
   if (url.pathname.match(/^\/api\/join\/[^/]+$/) && request.method === 'GET') {
     const pin = url.pathname.split('/')[3];
-    const gameId = pinToGameId.get(pin);
+    const gameId = await env.QUIZZES.get(`${PIN_PREFIX}${pin}`);
 
     if (!gameId) {
       return Response.json({ success: false, error: 'Invalid PIN' }, { status: 404 });
