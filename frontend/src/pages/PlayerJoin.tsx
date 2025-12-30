@@ -5,18 +5,23 @@ import { ArrowRight, Hash } from 'lucide-react';
 export function PlayerJoin() {
   const navigate = useNavigate();
   const search = useSearch({ from: '/play' }) as { pin?: string };
-  const [pin, setPin] = useState(search.pin || '');
+  
+  // Clean the PIN from URL (remove any non-digits)
+  const urlPin = search.pin?.replace(/\D/g, '') || '';
+  const [pin, setPin] = useState(urlPin);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const autoJoinAttempted = useRef(false);
 
   // Auto-join if PIN is provided in URL (from QR code)
   useEffect(() => {
-    if (search.pin && search.pin.length >= 6 && !autoJoinAttempted.current) {
+    const cleanPin = urlPin;
+    if (cleanPin && cleanPin.length >= 6 && !autoJoinAttempted.current) {
       autoJoinAttempted.current = true;
-      joinGame(search.pin);
+      // Small delay to ensure component is mounted
+      setTimeout(() => joinGame(cleanPin), 100);
     }
-  }, [search.pin]);
+  }, [urlPin]);
 
   async function joinGame(pinToJoin: string) {
     if (!pinToJoin.trim()) return;

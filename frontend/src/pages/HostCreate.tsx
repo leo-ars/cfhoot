@@ -215,11 +215,29 @@ export function HostCreate() {
     setError(null);
 
     try {
+      // Auto-save quiz before starting game
+      const quizId = currentQuizId || crypto.randomUUID();
+      const quiz: Quiz = { id: quizId, title: title.trim(), questions };
+      
+      const saveMethod = currentQuizId ? 'PUT' : 'POST';
+      const saveUrl = currentQuizId ? `/api/quizzes/${currentQuizId}` : '/api/quizzes';
+      
+      const saveResponse = await fetch(saveUrl, {
+        method: saveMethod,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(quiz),
+      });
+      
+      if (saveResponse.ok) {
+        const saved = await saveResponse.json() as SavedQuiz;
+        setCurrentQuizId(saved.id);
+      }
+
+      // Create game
       const response = await fetch('/api/games', { method: 'POST' });
       const data = await response.json() as { gameId: string; gamePin: string };
 
       // Store quiz in sessionStorage to send via WebSocket
-      const quiz: Quiz = { id: crypto.randomUUID(), title, questions };
       sessionStorage.setItem('pending_quiz', JSON.stringify(quiz));
 
       navigate({ to: '/host/presenter/$gameId', params: { gameId: data.gameId } });

@@ -105,6 +105,9 @@ async function handleApiRoute(url: URL, request: Request, env: Env): Promise<Res
     const quizzes: SavedQuiz[] = [];
     
     for (const key of list.keys) {
+      // Skip PIN mappings
+      if (key.name.startsWith(PIN_PREFIX)) continue;
+      
       const quiz = await env.QUIZZES.get<SavedQuiz>(key.name, 'json');
       if (quiz) quizzes.push(quiz);
     }
