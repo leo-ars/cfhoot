@@ -4,6 +4,8 @@ A Kahoot-style real-time quiz game built entirely on Cloudflare Workers.
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/leo-ars/cfhoot)
 
+![Screenshot](screenshot.png)
+
 ## Features
 
 - **Real-time multiplayer** - Players join with a 6-digit PIN and answer questions simultaneously
