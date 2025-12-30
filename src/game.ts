@@ -126,7 +126,7 @@ export class GameDurableObject extends DurableObject<Env> {
         this.handlePlayerJoin(ws, session, message.nickname);
         break;
       case 'player_answer':
-        this.handlePlayerAnswer(ws, session, message.questionId, message.answerIndex);
+        this.handlePlayerAnswer(ws, session, message.questionId, message.answerIndices);
         break;
       default:
         this.send(ws, { type: 'error', message: 'Unknown message type' });
@@ -258,7 +258,7 @@ export class GameDurableObject extends DurableObject<Env> {
     ws: WebSocket,
     session: WebSocketSession,
     questionId: string,
-    answerIndex: number
+    answerIndices: number[]
   ): void {
     if (!session.playerId) {
       this.send(ws, { type: 'error', message: 'Not joined as player' });
@@ -285,9 +285,17 @@ export class GameDurableObject extends DurableObject<Env> {
     }
 
     player.answers[questionId] = {
-      answerIndex,
+      answerIndices,
       timestamp: Date.now(),
     };
+
+    console.log('Player answered:', { 
+      nickname: player.nickname, 
+      questionId, 
+      answerIndices,
+      connectedPlayers: Object.values(this.state.players).filter(p => p.connected).length,
+      answeredPlayers: Object.values(this.state.players).filter(p => p.answers[questionId]).length
+    });
 
     this.broadcast({ type: 'answer_received', playerId: session.playerId });
 
@@ -305,20 +313,31 @@ export class GameDurableObject extends DurableObject<Env> {
     this.state.currentQuestionIndex = index;
     this.state.questionStartTime = Date.now();
 
+    // Send question to players (no image - they look at presenter screen)
     const questionForPlayer: QuestionForPlayer = {
       id: question.id,
       text: question.text,
       answers: question.answers,
       timerSeconds: question.timerSeconds,
       doublePoints: question.doublePoints,
+      multipleChoice: question.correctIndices.length > 1,
     };
 
-    this.broadcast({
-      type: 'question_start',
-      question: questionForPlayer,
-      questionIndex: index,
-      totalQuestions: this.state.quiz.questions.length,
-    });
+    // Send question to host with image
+    const questionForHost: QuestionForPlayer = {
+      ...questionForPlayer,
+      imageUrl: question.imageUrl,
+    };
+
+    // Send to each session based on role
+    for (const [ws, session] of this.sessions) {
+      this.send(ws, {
+        type: 'question_start',
+        question: session.isHost ? questionForHost : questionForPlayer,
+        questionIndex: index,
+        totalQuestions: this.state.quiz.questions.length,
+      });
+    }
 
     // Start timer countdown
     let secondsLeft = question.timerSeconds;
@@ -334,6 +353,7 @@ export class GameDurableObject extends DurableObject<Env> {
 
   private checkAllPlayersAnswered(): void {
     if (this.state.phase !== 'question') return;
+    if (!this.timerInterval) return; // Already ended
 
     const currentQuestion = this.state.quiz?.questions[this.state.currentQuestionIndex];
     if (!currentQuestion) return;
@@ -342,35 +362,61 @@ export class GameDurableObject extends DurableObject<Env> {
     const allAnswered = connectedPlayers.every((p) => p.answers[currentQuestion.id]);
 
     if (allAnswered && connectedPlayers.length > 0) {
+      console.log('All players answered, ending question early');
       this.endQuestion();
     }
   }
 
   private endQuestion(): void {
+    // Guard against double execution
+    if (!this.timerInterval && this.state.phase !== 'question') return;
+    
     if (this.timerInterval) {
       clearInterval(this.timerInterval);
       this.timerInterval = null;
     }
 
     const question = this.state.quiz?.questions[this.state.currentQuestionIndex];
-    if (!question || !this.state.questionStartTime) return;
+    if (!question || !this.state.questionStartTime) {
+      console.log('endQuestion: missing question or startTime', { question: !!question, startTime: this.state.questionStartTime });
+      return;
+    }
+    
+    console.log('endQuestion: scoring', { questionId: question.id, correctIndices: question.correctIndices });
 
-    // Calculate scores
+    // Calculate scores - faster answers get more points
     const maxPoints = question.doublePoints ? 2000 : 1000;
     const timeWindow = question.timerSeconds * 1000;
 
     for (const player of Object.values(this.state.players)) {
       const answer = player.answers[question.id];
-      if (answer && answer.answerIndex === question.correctIndex) {
-        const responseTime = answer.timestamp - this.state.questionStartTime;
-        const timeBonus = Math.max(0, 1 - responseTime / timeWindow);
-        const points = Math.round(maxPoints * (0.5 + 0.5 * timeBonus));
-        player.score += points;
+      console.log('Scoring player', { 
+        nickname: player.nickname, 
+        answer: answer?.answerIndices, 
+        correct: question.correctIndices 
+      });
+      if (answer) {
+        // Check if player's answers match the correct answers
+        const playerAnswers = new Set(answer.answerIndices);
+        const correctAnswers = new Set(question.correctIndices);
+        const isCorrect = 
+          playerAnswers.size === correctAnswers.size &&
+          [...playerAnswers].every(a => correctAnswers.has(a));
+        
+        console.log('isCorrect:', isCorrect, { playerAnswers: [...playerAnswers], correctAnswers: [...correctAnswers] });
+        
+        if (isCorrect) {
+          const responseTime = answer.timestamp - this.state.questionStartTime!;
+          const timeBonus = Math.max(0, 1 - responseTime / timeWindow);
+          const points = Math.round(maxPoints * (0.5 + 0.5 * timeBonus));
+          player.score += points;
+          console.log('Awarded points:', points, 'Total:', player.score);
+        }
       }
     }
 
     const scores = this.calculateLeaderboard();
-    this.broadcast({ type: 'question_end', correctIndex: question.correctIndex, scores });
+    this.broadcast({ type: 'question_end', correctIndices: question.correctIndices, scores });
 
     // Check if this was the last question
     const isLastQuestion = this.state.currentQuestionIndex >= (this.state.quiz?.questions.length ?? 0) - 1;
@@ -396,7 +442,14 @@ export class GameDurableObject extends DurableObject<Env> {
     return Object.values(this.state.players)
       .map((player) => {
         const answer = currentQuestion ? player.answers[currentQuestion.id] : undefined;
-        const lastAnswerCorrect = answer ? answer.answerIndex === currentQuestion?.correctIndex : false;
+        let lastAnswerCorrect = false;
+        if (answer && currentQuestion) {
+          const playerAnswers = new Set(answer.answerIndices);
+          const correctAnswers = new Set(currentQuestion.correctIndices);
+          lastAnswerCorrect = 
+            playerAnswers.size === correctAnswers.size &&
+            [...playerAnswers].every(a => correctAnswers.has(a));
+        }
 
         return {
           playerId: player.id,

@@ -3,9 +3,10 @@
 export interface Question {
   id: string;
   text: string;
+  imageUrl?: string; // R2 image URL for picture questions
   answers: [string, string, string, string];
-  correctIndex: 0 | 1 | 2 | 3;
-  timerSeconds: 5 | 10 | 20;
+  correctIndices: number[]; // Support multiple correct answers
+  timerSeconds: 5 | 10 | 20 | 30 | 60;
   doublePoints: boolean;
 }
 
@@ -24,7 +25,7 @@ export interface Player {
   id: string;
   nickname: string;
   score: number;
-  answers: Record<string, { answerIndex: number; timestamp: number }>;
+  answers: Record<string, { answerIndices: number[]; timestamp: number }>;
   connected: boolean;
 }
 
@@ -50,7 +51,7 @@ export type ClientMessage =
   | { type: 'host_show_leaderboard' }
   | { type: 'host_show_podium' }
   | { type: 'player_join'; nickname: string }
-  | { type: 'player_answer'; questionId: string; answerIndex: number };
+  | { type: 'player_answer'; questionId: string; answerIndices: number[] };
 
 // Server -> Client Messages
 export type ServerMessage =
@@ -62,18 +63,20 @@ export type ServerMessage =
   | { type: 'question_start'; question: QuestionForPlayer; questionIndex: number; totalQuestions: number }
   | { type: 'timer_tick'; secondsLeft: number }
   | { type: 'answer_received'; playerId: string }
-  | { type: 'question_end'; correctIndex: number; scores: LeaderboardEntry[] }
+  | { type: 'question_end'; correctIndices: number[]; scores: LeaderboardEntry[] }
   | { type: 'leaderboard_update'; leaderboard: LeaderboardEntry[] }
   | { type: 'podium_reveal'; position: 1 | 2 | 3; player: LeaderboardEntry | null }
   | { type: 'game_finished'; finalLeaderboard: LeaderboardEntry[] };
 
-// Question without correct answer (sent to players)
+// Question without correct answer (sent to players and host)
 export interface QuestionForPlayer {
   id: string;
   text: string;
+  imageUrl?: string; // Only sent to host, not to players
   answers: [string, string, string, string];
   timerSeconds: number;
   doublePoints: boolean;
+  multipleChoice: boolean; // Tell player if they can select multiple
 }
 
 export interface LeaderboardEntry {

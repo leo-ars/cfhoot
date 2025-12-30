@@ -30,5 +30,11 @@
 			"binding": "QUIZZES",
 			"id": "00000000000000000000000000000000"
 		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "IMAGES",
+			"bucket_name": "cfhoot-images"
+		}
 	]
 }

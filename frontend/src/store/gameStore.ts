@@ -17,11 +17,11 @@ export interface UIState {
   totalQuestions: number;
   secondsLeft: number;
   hasAnswered: boolean;
-  selectedAnswer: number | null;
+  selectedAnswers: number[];
   
   // Results
   leaderboard: LeaderboardEntry[];
-  lastCorrectIndex: number | null;
+  lastCorrectIndices: number[];
   
   // Podium
   podiumRevealed: (LeaderboardEntry | null)[];
@@ -41,9 +41,9 @@ const initialState: UIState = {
   totalQuestions: 0,
   secondsLeft: 0,
   hasAnswered: false,
-  selectedAnswer: null,
+  selectedAnswers: [],
   leaderboard: [],
-  lastCorrectIndex: null,
+  lastCorrectIndices: [],
   podiumRevealed: [null, null, null],
   error: null,
 };
@@ -96,8 +96,8 @@ export function handleServerMessage(message: ServerMessage) {
         totalQuestions: message.totalQuestions,
         secondsLeft: message.question.timerSeconds,
         hasAnswered: false,
-        selectedAnswer: null,
-        lastCorrectIndex: null,
+        selectedAnswers: [],
+        lastCorrectIndices: [],
         gameState: state.gameState ? { ...state.gameState, phase: 'question' } : null,
       }));
       break;
@@ -111,9 +111,10 @@ export function handleServerMessage(message: ServerMessage) {
       break;
       
     case 'question_end':
+      console.log('question_end received', { correctIndices: message.correctIndices, scores: message.scores });
       gameStore.setState((state) => ({
         ...state,
-        lastCorrectIndex: message.correctIndex,
+        lastCorrectIndices: message.correctIndices,
         leaderboard: message.scores,
       }));
       break;

@@ -21,6 +21,9 @@
 			},
 			"QUIZZES": {
 				"description": "KV namespace for storing saved quizzes that can be reused across games"
+			},
+			"IMAGES": {
+				"description": "R2 bucket for storing question images"
 			}
 		}
 	},

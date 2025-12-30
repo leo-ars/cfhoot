@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams } from '@tanstack/react-router';
 import { useStore } from '@tanstack/react-store';
-import { Triangle, Square, Circle, Star, CheckCircle, XCircle } from 'lucide-react';
+import { Triangle, Square, Circle, Star, CheckCircle, XCircle, Send } from 'lucide-react';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { gameStore } from '../store/gameStore';
 
@@ -13,7 +13,7 @@ export function PlayerGame() {
   const { send } = useWebSocket(gameId, false);
   
   const state = useStore(gameStore);
-  const { gameState, currentQuestion, secondsLeft, hasAnswered, selectedAnswer, lastCorrectIndex, leaderboard, error } = state;
+  const { gameState, currentQuestion, secondsLeft, hasAnswered, selectedAnswers, lastCorrectIndices, leaderboard, error } = state;
   
   const [nickname, setNickname] = useState('');
   const [joined, setJoined] = useState(false);
@@ -30,10 +30,34 @@ export function PlayerGame() {
     setJoined(true);
   };
 
+  const toggleAnswer = (index: number) => {
+    if (hasAnswered || !currentQuestion) return;
+    gameStore.setState((s) => {
+      const answers = new Set(s.selectedAnswers);
+      if (answers.has(index)) {
+        answers.delete(index);
+      } else {
+        answers.add(index);
+      }
+      return { ...s, selectedAnswers: Array.from(answers) };
+    });
+  };
+
+  const submitAnswer = () => {
+    if (hasAnswered || !currentQuestion || selectedAnswers.length === 0) return;
+    gameStore.setState((s) => ({ ...s, hasAnswered: true }));
+    send({ type: 'player_answer', questionId: currentQuestion.id, answerIndices: selectedAnswers });
+  };
+
+  // For single-choice, auto-submit
   const handleAnswer = (index: number) => {
     if (hasAnswered || !currentQuestion) return;
-    gameStore.setState((s) => ({ ...s, hasAnswered: true, selectedAnswer: index }));
-    send({ type: 'player_answer', questionId: currentQuestion.id, answerIndex: index });
+    if (currentQuestion.multipleChoice) {
+      toggleAnswer(index);
+    } else {
+      gameStore.setState((s) => ({ ...s, hasAnswered: true, selectedAnswers: [index] }));
+      send({ type: 'player_answer', questionId: currentQuestion.id, answerIndices: [index] });
+    }
   };
 
   // Nickname entry
@@ -94,34 +118,55 @@ export function PlayerGame() {
     return (
       <div className="min-h-screen flex flex-col p-4">
         <div className="flex justify-between items-center mb-4">
-          <span className="text-gray-400">{currentQuestion.text}</span>
+          <span className="text-gray-400 flex-1">{currentQuestion.text}</span>
           <div className="text-2xl font-bold text-white bg-brand-orange rounded-full w-12 h-12 flex items-center justify-center">
             {secondsLeft}
           </div>
         </div>
 
-        {currentQuestion.doublePoints && (
-          <div className="text-center mb-4">
-            <span className="bg-brand-gold text-black px-3 py-1 rounded-full text-sm font-bold">
-              🔥 2X POINTS
+        <div className="flex gap-2 justify-center mb-4">
+          {currentQuestion.doublePoints && (
+            <span className="bg-brand-gold text-black px-3 py-1 rounded-full text-sm font-bold animate-pulse">
+              🔥 DOUBLE POINTS 🔥
             </span>
-          </div>
-        )}
+          )}
+          {currentQuestion.multipleChoice && (
+            <span className="bg-brand-orange text-white px-3 py-1 rounded-full text-sm font-bold">
+              SELECT MULTIPLE
+            </span>
+          )}
+        </div>
 
         <div className="flex-1 grid grid-cols-2 gap-3">
           {currentQuestion.answers.map((_, index) => {
             const Icon = answerIcons[index];
+            const isSelected = selectedAnswers.includes(index);
             return (
               <button
                 key={index}
                 onClick={() => handleAnswer(index)}
-                className={`answer-btn ${answerColors[index]} justify-center`}
+                className={`answer-btn ${answerColors[index]} justify-center relative ${isSelected ? 'ring-4 ring-white' : ''}`}
               >
                 <Icon className="w-12 h-12" fill="white" />
+                {isSelected && (
+                  <div className="absolute top-2 right-2 w-6 h-6 bg-white rounded-full flex items-center justify-center">
+                    <CheckCircle className="w-5 h-5 text-green-600" />
+                  </div>
+                )}
               </button>
             );
           })}
         </div>
+
+        {currentQuestion.multipleChoice && selectedAnswers.length > 0 && (
+          <button
+            onClick={submitAnswer}
+            className="mt-4 btn btn-primary flex items-center justify-center gap-2 text-lg"
+          >
+            <Send className="w-5 h-5" />
+            Submit ({selectedAnswers.length} selected)
+          </button>
+        )}
       </div>
     );
   }
@@ -142,8 +187,10 @@ export function PlayerGame() {
   }
 
   // Question results / Leaderboard
-  if (lastCorrectIndex !== null || gameState?.phase === 'leaderboard') {
-    const wasCorrect = selectedAnswer === lastCorrectIndex;
+  if (lastCorrectIndices.length > 0 || gameState?.phase === 'leaderboard') {
+    const wasCorrect = 
+      selectedAnswers.length === lastCorrectIndices.length &&
+      selectedAnswers.every(a => lastCorrectIndices.includes(a));
     
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-4">

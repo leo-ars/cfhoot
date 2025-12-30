@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { Plus, Trash2, Play, ArrowLeft, Save, Check, FileText, Edit3 } from 'lucide-react';
+import { Plus, Trash2, Play, ArrowLeft, Save, Check, FileText, Edit3, Image, X, Upload } from 'lucide-react';
 import type { Question, Quiz, SavedQuiz } from '../../../src/types';
 
 type View = 'select' | 'edit';
@@ -119,11 +119,52 @@ export function HostCreate() {
     return {
       id: crypto.randomUUID(),
       text: '',
+      imageUrl: undefined,
       answers: ['', '', '', ''],
-      correctIndex: 0,
+      correctIndices: [0],
       timerSeconds: 20,
       doublePoints: false,
     };
+  }
+
+  function toggleCorrectAnswer(questionIndex: number, answerIndex: number) {
+    setQuestions((prev) =>
+      prev.map((q, i) => {
+        if (i !== questionIndex) return q;
+        const indices = new Set(q.correctIndices);
+        if (indices.has(answerIndex)) {
+          indices.delete(answerIndex);
+          // Ensure at least one answer is correct
+          if (indices.size === 0) indices.add(answerIndex);
+        } else {
+          indices.add(answerIndex);
+        }
+        return { ...q, correctIndices: Array.from(indices).sort() };
+      })
+    );
+  }
+
+  async function handleImageUpload(questionIndex: number, file: File) {
+    try {
+      const response = await fetch('/api/images', {
+        method: 'POST',
+        headers: { 'Content-Type': file.type },
+        body: file,
+      });
+
+      if (response.ok) {
+        const { imageUrl } = await response.json() as { imageUrl: string };
+        updateQuestion(questionIndex, { imageUrl });
+      } else {
+        setError('Failed to upload image');
+      }
+    } catch {
+      setError('Failed to upload image');
+    }
+  }
+
+  function removeImage(questionIndex: number) {
+    updateQuestion(questionIndex, { imageUrl: undefined });
   }
 
   function updateQuestion(index: number, updates: Partial<Question>) {
@@ -156,12 +197,16 @@ export function HostCreate() {
     // Validate
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i];
-      if (!q.text.trim()) {
-        setError(`Question ${i + 1} is empty`);
+      if (!q.text.trim() && !q.imageUrl) {
+        setError(`Question ${i + 1} needs text or an image`);
         return;
       }
       if (q.answers.some((a) => !a.trim())) {
         setError(`Question ${i + 1} has empty answers`);
+        return;
+      }
+      if (q.correctIndices.length === 0) {
+        setError(`Question ${i + 1} needs at least one correct answer`);
         return;
       }
     }
@@ -342,13 +387,53 @@ export function HostCreate() {
               )}
             </div>
 
+            {/* Image Upload */}
+            <div className="mb-4">
+              {question.imageUrl ? (
+                <div className="relative inline-block">
+                  <img
+                    src={question.imageUrl}
+                    alt="Question"
+                    className="max-h-48 rounded-lg border border-white/20"
+                  />
+                  <button
+                    onClick={() => removeImage(qIndex)}
+                    className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-400"
+                  >
+                    <X className="w-4 h-4 text-white" />
+                  </button>
+                </div>
+              ) : (
+                <label className="flex items-center gap-2 px-4 py-3 bg-white/10 border border-dashed border-white/30 rounded-lg cursor-pointer hover:bg-white/20 transition-colors">
+                  <Upload className="w-5 h-5 text-gray-400" />
+                  <span className="text-gray-400">Add image (optional)</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleImageUpload(qIndex, file);
+                    }}
+                  />
+                </label>
+              )}
+            </div>
+
             <input
               type="text"
               value={question.text}
               onChange={(e) => updateQuestion(qIndex, { text: e.target.value })}
               className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-orange mb-4"
-              placeholder="Enter question text"
+              placeholder={question.imageUrl ? "Enter question text (optional with image)" : "Enter question text"}
             />
+
+            {/* Multiple Choice Hint */}
+            {question.correctIndices.length > 1 && (
+              <p className="text-sm text-brand-gold mb-2">
+                Multiple correct answers selected - players must select all to score
+              </p>
+            )}
 
             <div className="grid grid-cols-2 gap-3 mb-4">
               {['Red', 'Blue', 'Yellow', 'Green'].map((color, aIndex) => (
@@ -357,7 +442,7 @@ export function HostCreate() {
                     type="text"
                     value={question.answers[aIndex]}
                     onChange={(e) => updateAnswer(qIndex, aIndex, e.target.value)}
-                    className={`w-full rounded-lg px-4 py-3 text-white placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-white ${
+                    className={`w-full rounded-lg px-4 py-3 pr-10 text-white placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-white ${
                       aIndex === 0 ? 'bg-answer-red' :
                       aIndex === 1 ? 'bg-answer-blue' :
                       aIndex === 2 ? 'bg-answer-yellow' : 'bg-answer-green'
@@ -365,15 +450,16 @@ export function HostCreate() {
                     placeholder={`Answer ${aIndex + 1}`}
                   />
                   <button
-                    onClick={() => updateQuestion(qIndex, { correctIndex: aIndex as 0|1|2|3 })}
-                    className={`absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full border-2 flex items-center justify-center ${
-                      question.correctIndex === aIndex
+                    onClick={() => toggleCorrectAnswer(qIndex, aIndex)}
+                    className={`absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded border-2 flex items-center justify-center transition-colors ${
+                      question.correctIndices.includes(aIndex)
                         ? 'bg-white border-white'
-                        : 'border-white/50'
+                        : 'border-white/50 hover:border-white'
                     }`}
+                    title="Click to mark as correct (can select multiple)"
                   >
-                    {question.correctIndex === aIndex && (
-                      <span className="text-answer-green text-sm">✓</span>
+                    {question.correctIndices.includes(aIndex) && (
+                      <Check className="w-4 h-4 text-green-600" />
                     )}
                   </button>
                 </div>
@@ -385,12 +471,14 @@ export function HostCreate() {
                 <label className="block text-sm text-gray-400 mb-1">Timer</label>
                 <select
                   value={question.timerSeconds}
-                  onChange={(e) => updateQuestion(qIndex, { timerSeconds: Number(e.target.value) as 5|10|20 })}
+                  onChange={(e) => updateQuestion(qIndex, { timerSeconds: Number(e.target.value) as 5|10|20|30|60 })}
                   className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white"
                 >
                   <option value={5}>5 seconds</option>
                   <option value={10}>10 seconds</option>
                   <option value={20}>20 seconds</option>
+                  <option value={30}>30 seconds</option>
+                  <option value={60}>60 seconds</option>
                 </select>
               </div>
 

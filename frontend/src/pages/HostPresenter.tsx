@@ -95,18 +95,32 @@ export function HostPresenter() {
           </div>
         </div>
 
-        {currentQuestion.doublePoints && (
-          <div className="text-center mb-4">
-            <span className="bg-brand-gold text-black px-4 py-1 rounded-full font-bold">
+        <div className="flex gap-2 justify-center mb-4">
+          {currentQuestion.doublePoints && (
+            <span className="bg-brand-gold text-black px-4 py-2 rounded-full font-bold text-xl animate-pulse">
               🔥 DOUBLE POINTS 🔥
             </span>
-          </div>
-        )}
+          )}
+          {currentQuestion.multipleChoice && (
+            <span className="bg-brand-orange text-white px-4 py-1 rounded-full font-bold">
+              SELECT ALL CORRECT
+            </span>
+          )}
+        </div>
 
-        <div className="flex-1 flex items-center justify-center">
-          <h2 className="text-4xl font-bold text-white text-center max-w-4xl">
-            {currentQuestion.text}
-          </h2>
+        <div className="flex-1 flex flex-col items-center justify-center gap-6">
+          {currentQuestion.imageUrl && (
+            <img
+              src={currentQuestion.imageUrl}
+              alt="Question"
+              className="max-h-[50vh] max-w-full rounded-2xl border-4 border-white/30 shadow-2xl"
+            />
+          )}
+          {currentQuestion.text && (
+            <h2 className="text-4xl font-bold text-white text-center max-w-4xl">
+              {currentQuestion.text}
+            </h2>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-4 mt-8">

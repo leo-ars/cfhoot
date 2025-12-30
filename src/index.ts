@@ -170,5 +170,50 @@ async function handleApiRoute(url: URL, request: Request, env: Env): Promise<Res
     return Response.json({ success: true });
   }
 
+  // POST /api/images - Upload an image to R2
+  if (url.pathname === '/api/images' && request.method === 'POST') {
+    const contentType = request.headers.get('Content-Type') || 'image/jpeg';
+    
+    // Validate content type
+    if (!contentType.startsWith('image/')) {
+      return Response.json({ error: 'Only images are allowed' }, { status: 400 });
+    }
+
+    const imageId = crypto.randomUUID();
+    const extension = contentType.split('/')[1] || 'jpg';
+    const key = `${imageId}.${extension}`;
+
+    const body = await request.arrayBuffer();
+    await env.IMAGES.put(key, body, {
+      httpMetadata: { contentType },
+    });
+
+    const imageUrl = `/api/images/${key}`;
+    return Response.json({ imageUrl, key }, { status: 201 });
+  }
+
+  // GET /api/images/:key - Retrieve an image from R2
+  if (url.pathname.match(/^\/api\/images\/[^/]+$/) && request.method === 'GET') {
+    const key = url.pathname.split('/')[3];
+    const object = await env.IMAGES.get(key);
+
+    if (!object) {
+      return new Response('Image not found', { status: 404 });
+    }
+
+    const headers = new Headers();
+    headers.set('Content-Type', object.httpMetadata?.contentType || 'image/jpeg');
+    headers.set('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+
+    return new Response(object.body, { headers });
+  }
+
+  // DELETE /api/images/:key - Delete an image from R2
+  if (url.pathname.match(/^\/api\/images\/[^/]+$/) && request.method === 'DELETE') {
+    const key = url.pathname.split('/')[3];
+    await env.IMAGES.delete(key);
+    return Response.json({ success: true });
+  }
+
   return new Response('Not found', { status: 404 });
 }
