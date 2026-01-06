@@ -3,6 +3,31 @@ import { useNavigate } from '@tanstack/react-router';
 import { Plus, Trash2, Play, ArrowLeft, Save, Check, FileText, Edit3, Image, X, Upload } from 'lucide-react';
 import type { Question, Quiz, SavedQuiz } from '../../../src/types';
 
+// Fallback for local dev when accessing via IP address (e.g., mobile testing).
+// crypto.randomUUID() requires a secure context (HTTPS or localhost).
+// HTTP + IP address (like http://192.168.x.x:5173) is not secure, so we fall back.
+function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (crypto.getRandomValues(new Uint8Array(1))[0] & 15) >> (c === 'x' ? 0 : 3);
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
+function createEmptyQuestion(): Question {
+  return {
+    id: generateUUID(),
+    text: '',
+    imageUrl: undefined,
+    answers: ['', '', '', ''],
+    correctIndices: [0],
+    timerSeconds: 20,
+    doublePoints: false,
+  };
+}
+
 type View = 'select' | 'edit';
 
 export function HostCreate() {
@@ -49,7 +74,7 @@ export function HostCreate() {
     setSaveSuccess(false);
 
     try {
-      const quizId = currentQuizId || crypto.randomUUID();
+      const quizId = currentQuizId || generateUUID();
       const quiz: Quiz = { 
         id: quizId, 
         title: title.trim(), 
@@ -115,17 +140,6 @@ export function HostCreate() {
     }
   }
 
-  function createEmptyQuestion(): Question {
-    return {
-      id: crypto.randomUUID(),
-      text: '',
-      imageUrl: undefined,
-      answers: ['', '', '', ''],
-      correctIndices: [0],
-      timerSeconds: 20,
-      doublePoints: false,
-    };
-  }
 
   function toggleCorrectAnswer(questionIndex: number, answerIndex: number) {
     setQuestions((prev) =>
@@ -216,7 +230,7 @@ export function HostCreate() {
 
     try {
       // Auto-save quiz before starting game
-      const quizId = currentQuizId || crypto.randomUUID();
+      const quizId = currentQuizId || generateUUID();
       const quiz: Quiz = { id: quizId, title: title.trim(), questions };
       
       const saveMethod = currentQuizId ? 'PUT' : 'POST';

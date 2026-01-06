@@ -51,6 +51,7 @@ export type ClientMessage =
   | { type: 'host_show_leaderboard' }
   | { type: 'host_show_podium' }
   | { type: 'player_join'; nickname: string }
+  | { type: 'player_rejoin'; playerId: string; nickname: string }
   | { type: 'player_answer'; questionId: string; answerIndices: number[] };
 
 // Server -> Client Messages
@@ -58,6 +59,7 @@ export type ServerMessage =
   | { type: 'error'; message: string }
   | { type: 'game_state'; state: GameState }
   | { type: 'player_joined'; player: Player; playerCount: number }
+  | { type: 'player_rejoined'; player: Player; playerCount: number }
   | { type: 'player_left'; playerId: string; playerCount: number }
   | { type: 'game_starting' }
   | { type: 'question_start'; question: QuestionForPlayer; questionIndex: number; totalQuestions: number }

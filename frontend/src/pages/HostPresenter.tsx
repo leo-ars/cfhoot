@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useParams } from '@tanstack/react-router';
 import { useStore } from '@tanstack/react-store';
 import { QRCodeSVG } from 'qrcode.react';
-import { Users, Play, ArrowRight, Trophy } from 'lucide-react';
+import { Users, Play, ArrowRight, Trophy, Loader2 } from 'lucide-react';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { gameStore } from '../store/gameStore';
 import type { Quiz } from '../../../src/types';
@@ -12,9 +12,11 @@ export function HostPresenter() {
   const { send } = useWebSocket(gameId, true);
   
   const state = useStore(gameStore);
-  const { gameState, currentQuestion, questionIndex, totalQuestions, secondsLeft, leaderboard, podiumRevealed } = state;
+  const { gameState, currentQuestion, questionIndex, totalQuestions, secondsLeft, leaderboard, podiumRevealed, reconnecting } = state;
   
-  const playerCount = gameState ? Object.keys(gameState.players).length : 0;
+  // Count only connected players
+  const connectedPlayers = gameState ? Object.values(gameState.players).filter(p => p.connected) : [];
+  const playerCount = connectedPlayers.length;
   const joinUrl = `${window.location.origin}/play?pin=${gameState?.gamePin}`;
 
   // Send quiz on connect
@@ -32,6 +34,16 @@ export function HostPresenter() {
   const handleStartGame = () => send({ type: 'host_start_game' });
   const handleNextQuestion = () => send({ type: 'host_next_question' });
   const handleShowPodium = () => send({ type: 'host_show_podium' });
+
+  // Reconnecting overlay
+  if (reconnecting) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-4">
+        <Loader2 className="w-16 h-16 text-brand-orange animate-spin mb-4" />
+        <p className="text-white text-2xl">Reconnecting...</p>
+      </div>
+    );
+  }
 
   // Lobby view
   if (gameState?.phase === 'lobby') {
@@ -57,11 +69,18 @@ export function HostPresenter() {
             <span>{playerCount} player{playerCount !== 1 ? 's' : ''} joined</span>
           </div>
 
-          {playerCount > 0 && (
+          {Object.keys(gameState.players).length > 0 && (
             <div className="mb-6">
               <div className="flex flex-wrap justify-center gap-2">
                 {Object.values(gameState.players).map((player) => (
-                  <span key={player.id} className="bg-brand-orange/30 text-white px-3 py-1 rounded-full text-sm">
+                  <span 
+                    key={player.id} 
+                    className={`px-3 py-1 rounded-full text-sm ${
+                      player.connected 
+                        ? 'bg-brand-orange/30 text-white' 
+                        : 'bg-gray-600/30 text-gray-400 line-through'
+                    }`}
+                  >
                     {player.nickname}
                   </span>
                 ))}

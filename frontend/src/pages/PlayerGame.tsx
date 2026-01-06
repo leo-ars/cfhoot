@@ -1,22 +1,97 @@
 import { useState, useEffect } from 'react';
 import { useParams } from '@tanstack/react-router';
 import { useStore } from '@tanstack/react-store';
-import { Triangle, Square, Circle, Star, CheckCircle, XCircle, Send } from 'lucide-react';
+import { Triangle, Square, Circle, Star, CheckCircle, XCircle, Send, Loader2 } from 'lucide-react';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { gameStore } from '../store/gameStore';
 
 const answerIcons = [Triangle, Square, Circle, Star];
 const answerColors = ['bg-answer-red', 'bg-answer-blue', 'bg-answer-yellow', 'bg-answer-green'];
 
+// Session storage for auto-rejoin
+interface PlayerSession {
+  playerId: string;
+  nickname: string;
+}
+
+function getStoredSession(gameId: string): PlayerSession | null {
+  try {
+    const stored = localStorage.getItem(`cfhoot_session_${gameId}`);
+    return stored ? JSON.parse(stored) : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeSession(gameId: string, session: PlayerSession): void {
+  localStorage.setItem(`cfhoot_session_${gameId}`, JSON.stringify(session));
+}
+
 export function PlayerGame() {
   const { gameId } = useParams({ from: '/play/$gameId' });
   const { send } = useWebSocket(gameId, false);
   
   const state = useStore(gameStore);
-  const { gameState, currentQuestion, secondsLeft, hasAnswered, selectedAnswers, lastCorrectIndices, leaderboard, error } = state;
+  const { gameState, currentQuestion, secondsLeft, hasAnswered, selectedAnswers, lastCorrectIndices, leaderboard, error, connected, reconnecting } = state;
   
   const [nickname, setNickname] = useState('');
   const [joined, setJoined] = useState(false);
+  const [rejoinSentThisConnection, setRejoinSentThisConnection] = useState(false);
+
+  // Reset rejoin tracking when disconnected (enables rejoin on reconnect)
+  useEffect(() => {
+    if (!connected) {
+      setRejoinSentThisConnection(false);
+    }
+  }, [connected]);
+
+  // Auto-rejoin on connect if we have a stored session
+  useEffect(() => {
+    if (!connected || rejoinSentThisConnection) return;
+
+    const storedSession = getStoredSession(gameId);
+    if (storedSession) {
+      setNickname(storedSession.nickname);
+      send({ type: 'player_rejoin', playerId: storedSession.playerId, nickname: storedSession.nickname });
+      setRejoinSentThisConnection(true);
+    }
+  }, [connected, rejoinSentThisConnection, gameId, send]);
+
+  // Handle successful rejoin - detect from gameState players
+  useEffect(() => {
+    if (!gameState || joined) return;
+
+    const storedSession = getStoredSession(gameId);
+    if (storedSession && rejoinSentThisConnection) {
+      const player = gameState.players[storedSession.playerId];
+      if (player && player.connected) {
+        setNickname(player.nickname);
+        setJoined(true);
+        
+        // Check if player already answered current question
+        if (currentQuestion && player.answers[currentQuestion.id]) {
+          gameStore.setState((s) => ({ 
+            ...s, 
+            hasAnswered: true,
+            selectedAnswers: player.answers[currentQuestion.id].answerIndices 
+          }));
+        }
+      }
+    }
+  }, [gameState, joined, gameId, rejoinSentThisConnection, currentQuestion]);
+
+  // Store session when we join and find our playerId
+  useEffect(() => {
+    if (!gameState || !joined || !nickname) return;
+
+    const myPlayer = Object.values(gameState.players).find(
+      (p) => p.nickname.toLowerCase() === nickname.toLowerCase()
+    );
+
+    if (myPlayer) {
+      storeSession(gameId, { playerId: myPlayer.id, nickname: myPlayer.nickname });
+    }
+  }, [gameState, joined, nickname, gameId]);
 
   // Find player's rank
   const myRank = leaderboard.find((e) => 
@@ -60,6 +135,16 @@ export function PlayerGame() {
     }
   };
 
+  // Reconnecting overlay
+  if (reconnecting && joined) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-4">
+        <Loader2 className="w-12 h-12 text-brand-orange animate-spin mb-4" />
+        <p className="text-white text-xl">Reconnecting...</p>
+      </div>
+    );
+  }
+
   // Nickname entry
   if (!joined || (error && !gameState)) {
     return (
@@ -67,6 +152,14 @@ export function PlayerGame() {
         <h1 className="text-4xl font-extrabold text-white mb-8">
           CF<span className="text-brand-orange">Hoot</span>
         </h1>
+
+        {/* Show if attempting auto-rejoin */}
+        {rejoinSentThisConnection && !error && !joined && (
+          <div className="card max-w-sm w-full mb-4 text-center">
+            <Loader2 className="w-8 h-8 text-brand-orange animate-spin mx-auto mb-2" />
+            <p className="text-gray-300">Reconnecting to game...</p>
+          </div>
+        )}
 
         <form onSubmit={handleJoin} className="card max-w-sm w-full">
           <label className="block text-gray-300 mb-2">Choose your nickname</label>
@@ -87,7 +180,7 @@ export function PlayerGame() {
 
           <button
             type="submit"
-            disabled={!nickname.trim()}
+            disabled={!nickname.trim() || (rejoinSentThisConnection && !error)}
             className="btn btn-primary w-full text-xl disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Join Game

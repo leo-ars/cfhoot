@@ -16,21 +16,52 @@ interface WebSocketSession {
 }
 
 export class GameDurableObject extends DurableObject<Env> {
-  private state: GameState;
+  private state!: GameState;
   private sessions: Map<WebSocket, WebSocketSession> = new Map();
   private timerInterval: number | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.state = {
-      phase: 'lobby',
-      gamePin: this.generatePin(),
-      quiz: null,
-      players: {},
-      currentQuestionIndex: -1,
-      questionStartTime: null,
-      hostConnected: false,
-    };
+    // Load persisted state on startup
+    ctx.blockConcurrencyWhile(async () => {
+      const stored = await ctx.storage.get<GameState>('gameState');
+      if (stored) {
+        this.state = stored;
+        // Reset connection states since WebSockets don't survive restart
+        this.state.hostConnected = false;
+        for (const player of Object.values(this.state.players)) {
+          player.connected = false;
+        }
+        
+        // Handle interrupted question (DO was evicted mid-question)
+        if (this.state.phase === 'question' && this.state.questionStartTime && this.state.quiz) {
+          const question = this.state.quiz.questions[this.state.currentQuestionIndex];
+          if (question) {
+            const elapsed = Math.floor((Date.now() - this.state.questionStartTime) / 1000);
+            if (elapsed >= question.timerSeconds) {
+              // Time already expired - move to leaderboard
+              this.state.phase = 'leaderboard';
+              await ctx.storage.put('gameState', this.state);
+            }
+            // If time remaining, timer will restart when clients reconnect
+          }
+        }
+      } else {
+        this.state = {
+          phase: 'lobby',
+          gamePin: this.generatePin(),
+          quiz: null,
+          players: {},
+          currentQuestionIndex: -1,
+          questionStartTime: null,
+          hostConnected: false,
+        };
+      }
+    });
+  }
+
+  private async saveState(): Promise<void> {
+    await this.ctx.storage.put('gameState', this.state);
   }
 
   private generatePin(): string {
@@ -94,6 +125,70 @@ export class GameDurableObject extends DurableObject<Env> {
     // Send current state to new connection
     this.send(server, { type: 'game_state', state: this.getPublicState() });
 
+    // If mid-question, send current question to reconnecting client
+    if (this.state.phase === 'question' && this.state.questionStartTime && this.state.quiz) {
+      const question = this.state.quiz.questions[this.state.currentQuestionIndex];
+      if (question) {
+        const elapsed = Math.floor((Date.now() - this.state.questionStartTime) / 1000);
+        const remaining = Math.max(0, question.timerSeconds - elapsed);
+        
+        // Send question to this client
+        const questionForPlayer: QuestionForPlayer = {
+          id: question.id,
+          text: question.text,
+          answers: question.answers,
+          timerSeconds: question.timerSeconds,
+          doublePoints: question.doublePoints,
+          multipleChoice: question.correctIndices.length > 1,
+          imageUrl: isHost ? question.imageUrl : undefined,
+        };
+        
+        this.send(server, {
+          type: 'question_start',
+          question: questionForPlayer,
+          questionIndex: this.state.currentQuestionIndex,
+          totalQuestions: this.state.quiz.questions.length,
+        });
+        this.send(server, { type: 'timer_tick', secondsLeft: remaining });
+        
+        // Restart timer if it was lost (DO eviction recovery)
+        if (!this.timerInterval) {
+          if (remaining > 0) {
+            let secondsLeft = remaining;
+            this.timerInterval = setInterval(() => {
+              secondsLeft--;
+              if (secondsLeft > 0) {
+                this.broadcast({ type: 'timer_tick', secondsLeft });
+              } else {
+                this.endQuestion();
+              }
+            }, 1000) as unknown as number;
+          } else {
+            // Time expired while disconnected - end question
+            this.endQuestion();
+          }
+        }
+      }
+    }
+    
+    // If in leaderboard phase, send leaderboard
+    if (this.state.phase === 'leaderboard') {
+      const leaderboard = this.calculateLeaderboard();
+      this.send(server, { type: 'leaderboard_update', leaderboard });
+    }
+    
+    // If in podium/finished phase, send podium reveals immediately
+    if (this.state.phase === 'podium' || this.state.phase === 'finished') {
+      const leaderboard = this.calculateLeaderboard();
+      // Send all podium reveals at once for reconnecting client
+      this.send(server, { type: 'podium_reveal', position: 3, player: leaderboard[2] ?? null });
+      this.send(server, { type: 'podium_reveal', position: 2, player: leaderboard[1] ?? null });
+      this.send(server, { type: 'podium_reveal', position: 1, player: leaderboard[0] ?? null });
+      if (this.state.phase === 'finished') {
+        this.send(server, { type: 'game_finished', finalLeaderboard: leaderboard });
+      }
+    }
+
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -125,6 +220,9 @@ export class GameDurableObject extends DurableObject<Env> {
       case 'player_join':
         this.handlePlayerJoin(ws, session, message.nickname);
         break;
+      case 'player_rejoin':
+        this.handlePlayerRejoin(ws, session, message.playerId, message.nickname);
+        break;
       case 'player_answer':
         this.handlePlayerAnswer(ws, session, message.questionId, message.answerIndices);
         break;
@@ -133,12 +231,13 @@ export class GameDurableObject extends DurableObject<Env> {
     }
   }
 
-  private handleHostCreateQuiz(ws: WebSocket, session: WebSocketSession, quiz: Quiz): void {
+  private async handleHostCreateQuiz(ws: WebSocket, session: WebSocketSession, quiz: Quiz): Promise<void> {
     if (!session.isHost) {
       this.send(ws, { type: 'error', message: 'Not authorized' });
       return;
     }
     this.state.quiz = quiz;
+    await this.saveState();
     this.broadcast({ type: 'game_state', state: this.getPublicState() });
   }
 
@@ -151,8 +250,10 @@ export class GameDurableObject extends DurableObject<Env> {
       this.send(ws, { type: 'error', message: 'No quiz loaded' });
       return;
     }
-    if (Object.keys(this.state.players).length === 0) {
-      this.send(ws, { type: 'error', message: 'No players joined' });
+    // Check for connected players
+    const connectedPlayers = Object.values(this.state.players).filter(p => p.connected);
+    if (connectedPlayers.length === 0) {
+      this.send(ws, { type: 'error', message: 'No players connected' });
       return;
     }
 
@@ -196,8 +297,9 @@ export class GameDurableObject extends DurableObject<Env> {
     this.showPodium();
   }
 
-  private showPodium(): void {
+  private async showPodium(): Promise<void> {
     this.state.phase = 'podium';
+    await this.saveState();
     const leaderboard = this.calculateLeaderboard();
 
     // Reveal podium positions with delays
@@ -248,10 +350,85 @@ export class GameDurableObject extends DurableObject<Env> {
 
     session.playerId = playerId;
     this.state.players[playerId] = player;
+    this.saveState(); // Persist new player
 
     const playerCount = Object.keys(this.state.players).length;
     this.broadcast({ type: 'player_joined', player, playerCount });
     this.send(ws, { type: 'game_state', state: this.getPublicState() });
+  }
+
+  private async handlePlayerRejoin(
+    ws: WebSocket,
+    session: WebSocketSession,
+    playerId: string,
+    nickname: string
+  ): Promise<void> {
+    if (session.isHost) {
+      this.send(ws, { type: 'error', message: 'Host cannot rejoin as player' });
+      return;
+    }
+
+    // Check if player exists
+    const existingPlayer = this.state.players[playerId];
+    if (!existingPlayer) {
+      // Player doesn't exist - fall back to regular join if in lobby
+      if (this.state.phase === 'lobby') {
+        this.handlePlayerJoin(ws, session, nickname);
+      } else {
+        this.send(ws, { type: 'error', message: 'Player not found. Game already in progress.' });
+      }
+      return;
+    }
+
+    // Verify nickname matches
+    if (existingPlayer.nickname.toLowerCase() !== nickname.toLowerCase()) {
+      this.send(ws, { type: 'error', message: 'Nickname does not match' });
+      return;
+    }
+
+    // Reconnect the player
+    session.playerId = playerId;
+    existingPlayer.connected = true;
+    await this.saveState();
+
+    const connectedCount = Object.values(this.state.players).filter(p => p.connected).length;
+    this.broadcast({ type: 'player_rejoined', player: existingPlayer, playerCount: connectedCount });
+    this.send(ws, { type: 'game_state', state: this.getPublicState() });
+
+    // If game is in question phase, send current question
+    if (this.state.phase === 'question' && this.state.quiz) {
+      const question = this.state.quiz.questions[this.state.currentQuestionIndex];
+      if (question) {
+        const questionForPlayer: QuestionForPlayer = {
+          id: question.id,
+          text: question.text,
+          answers: question.answers,
+          timerSeconds: question.timerSeconds,
+          doublePoints: question.doublePoints,
+          multipleChoice: question.correctIndices.length > 1,
+        };
+
+        // Calculate remaining time
+        const elapsed = this.state.questionStartTime 
+          ? Math.floor((Date.now() - this.state.questionStartTime) / 1000)
+          : 0;
+        const secondsLeft = Math.max(0, question.timerSeconds - elapsed);
+
+        this.send(ws, {
+          type: 'question_start',
+          question: questionForPlayer,
+          questionIndex: this.state.currentQuestionIndex,
+          totalQuestions: this.state.quiz.questions.length,
+        });
+        this.send(ws, { type: 'timer_tick', secondsLeft });
+      }
+    }
+
+    // If game is in leaderboard phase, send leaderboard
+    if (this.state.phase === 'leaderboard') {
+      const leaderboard = this.calculateLeaderboard();
+      this.send(ws, { type: 'leaderboard_update', leaderboard });
+    }
   }
 
   private handlePlayerAnswer(
@@ -289,14 +466,6 @@ export class GameDurableObject extends DurableObject<Env> {
       timestamp: Date.now(),
     };
 
-    console.log('Player answered:', { 
-      nickname: player.nickname, 
-      questionId, 
-      answerIndices,
-      connectedPlayers: Object.values(this.state.players).filter(p => p.connected).length,
-      answeredPlayers: Object.values(this.state.players).filter(p => p.answers[questionId]).length
-    });
-
     this.broadcast({ type: 'answer_received', playerId: session.playerId });
 
     // Check if all connected players have answered
@@ -312,6 +481,7 @@ export class GameDurableObject extends DurableObject<Env> {
     this.state.phase = 'question';
     this.state.currentQuestionIndex = index;
     this.state.questionStartTime = Date.now();
+    this.saveState(); // Persist question start
 
     // Send question to players (no image - they look at presenter screen)
     const questionForPlayer: QuestionForPlayer = {
@@ -362,7 +532,6 @@ export class GameDurableObject extends DurableObject<Env> {
     const allAnswered = connectedPlayers.every((p) => p.answers[currentQuestion.id]);
 
     if (allAnswered && connectedPlayers.length > 0) {
-      console.log('All players answered, ending question early');
       this.endQuestion();
     }
   }
@@ -378,11 +547,8 @@ export class GameDurableObject extends DurableObject<Env> {
 
     const question = this.state.quiz?.questions[this.state.currentQuestionIndex];
     if (!question || !this.state.questionStartTime) {
-      console.log('endQuestion: missing question or startTime', { question: !!question, startTime: this.state.questionStartTime });
       return;
     }
-    
-    console.log('endQuestion: scoring', { questionId: question.id, correctIndices: question.correctIndices });
 
     // Calculate scores - faster answers get more points
     const maxPoints = question.doublePoints ? 2000 : 1000;
@@ -390,31 +556,23 @@ export class GameDurableObject extends DurableObject<Env> {
 
     for (const player of Object.values(this.state.players)) {
       const answer = player.answers[question.id];
-      console.log('Scoring player', { 
-        nickname: player.nickname, 
-        answer: answer?.answerIndices, 
-        correct: question.correctIndices 
-      });
       if (answer) {
-        // Check if player's answers match the correct answers
         const playerAnswers = new Set(answer.answerIndices);
         const correctAnswers = new Set(question.correctIndices);
         const isCorrect = 
           playerAnswers.size === correctAnswers.size &&
           [...playerAnswers].every(a => correctAnswers.has(a));
         
-        console.log('isCorrect:', isCorrect, { playerAnswers: [...playerAnswers], correctAnswers: [...correctAnswers] });
-        
         if (isCorrect) {
           const responseTime = answer.timestamp - this.state.questionStartTime!;
           const timeBonus = Math.max(0, 1 - responseTime / timeWindow);
           const points = Math.round(maxPoints * (0.5 + 0.5 * timeBonus));
           player.score += points;
-          console.log('Awarded points:', points, 'Total:', player.score);
         }
       }
     }
 
+    this.saveState(); // Persist scores after question
     const scores = this.calculateLeaderboard();
     this.broadcast({ type: 'question_end', correctIndices: question.correctIndices, scores });
 
@@ -432,6 +590,7 @@ export class GameDurableObject extends DurableObject<Env> {
 
   private showLeaderboard(): void {
     this.state.phase = 'leaderboard';
+    this.saveState(); // Persist phase
     const leaderboard = this.calculateLeaderboard();
     this.broadcast({ type: 'leaderboard_update', leaderboard });
   }
@@ -472,6 +631,7 @@ export class GameDurableObject extends DurableObject<Env> {
       const player = this.state.players[session.playerId];
       if (player) {
         player.connected = false;
+        this.saveState(); // Persist disconnection
         const playerCount = Object.values(this.state.players).filter((p) => p.connected).length;
         this.broadcast({ type: 'player_left', playerId: session.playerId, playerCount });
       }

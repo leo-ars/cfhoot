@@ -4,6 +4,7 @@ import type { GameState, ServerMessage, LeaderboardEntry, QuestionForPlayer } fr
 export interface UIState {
   // Connection state
   connected: boolean;
+  reconnecting: boolean;
   playerId: string | null;
   nickname: string | null;
   isHost: boolean;
@@ -32,6 +33,7 @@ export interface UIState {
 
 const initialState: UIState = {
   connected: false,
+  reconnecting: false,
   playerId: null,
   nickname: null,
   isHost: false,
@@ -65,19 +67,47 @@ export function handleServerMessage(message: ServerMessage) {
       break;
       
     case 'player_joined':
-      gameStore.setState((state) => ({
-        ...state,
-        gameState: state.gameState
-          ? { ...state.gameState, players: { ...state.gameState.players, [message.player.id]: message.player } }
-          : null,
-      }));
+      gameStore.setState((state) => {
+        if (!state.gameState) return state;
+        return {
+          ...state,
+          gameState: { 
+            ...state.gameState, 
+            players: { ...state.gameState.players, [message.player.id]: message.player } 
+          },
+        };
+      });
+      break;
+
+    case 'player_rejoined':
+      gameStore.setState((state) => {
+        if (!state.gameState) return state;
+        return {
+          ...state,
+          gameState: { 
+            ...state.gameState, 
+            players: { ...state.gameState.players, [message.player.id]: message.player } 
+          },
+        };
+      });
       break;
       
     case 'player_left':
       gameStore.setState((state) => {
         if (!state.gameState) return state;
-        const { [message.playerId]: _, ...players } = state.gameState.players;
-        return { ...state, gameState: { ...state.gameState, players } };
+        // Mark as disconnected instead of removing (allows rejoin)
+        const player = state.gameState.players[message.playerId];
+        if (!player) return state;
+        return { 
+          ...state, 
+          gameState: { 
+            ...state.gameState, 
+            players: { 
+              ...state.gameState.players, 
+              [message.playerId]: { ...player, connected: false } 
+            } 
+          } 
+        };
       });
       break;
       
@@ -111,7 +141,6 @@ export function handleServerMessage(message: ServerMessage) {
       break;
       
     case 'question_end':
-      console.log('question_end received', { correctIndices: message.correctIndices, scores: message.scores });
       gameStore.setState((state) => ({
         ...state,
         lastCorrectIndices: message.correctIndices,
