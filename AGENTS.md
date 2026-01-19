@@ -174,9 +174,12 @@ if (!gameId) {
 ## State Management
 
 ### Backend (Durable Object)
-- Use `this.ctx.storage.put()` to persist state
+- Uses **Durable Object SQL** (`this.ctx.storage.sql`) for state persistence
+- Two tables: `game_state` (single row) and `players` (one row per player)
 - Always call `await this.saveState()` after state mutations
+- Automatic migration from old KV storage API on first load
 - Reset connection states on DO startup (WebSockets don't survive restarts)
+- SQL provides better performance with 40+ players and easier debugging
 
 ### Frontend (TanStack Store)
 - Centralize all UI state in `gameStore.ts`

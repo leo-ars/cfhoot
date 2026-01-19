@@ -29,7 +29,12 @@ export class GameDurableObject extends DurableObject<Env> {
     super(ctx, env);
     // Load persisted state on startup
     ctx.blockConcurrencyWhile(async () => {
-      const stored = await ctx.storage.get<GameState>('gameState');
+      // Initialize SQL schema if not exists
+      await this.initializeSQL();
+      
+      // Try to load from SQL first, fallback to old KV storage for migration
+      const stored = await this.loadState();
+      
       if (stored) {
         this.state = stored;
         // Reset connection states since WebSockets don't survive restart
@@ -46,7 +51,7 @@ export class GameDurableObject extends DurableObject<Env> {
             if (elapsed >= question.timerSeconds) {
               // Time already expired - move to leaderboard
               this.state.phase = 'leaderboard';
-              await ctx.storage.put('gameState', this.state);
+              await this.saveState();
             }
             // If time remaining, timer will restart when clients reconnect
           }
@@ -63,12 +68,156 @@ export class GameDurableObject extends DurableObject<Env> {
           timerPaused: false,
           pausedAtSecondsLeft: null,
         };
+        await this.saveState();
       }
     });
   }
 
+  private async initializeSQL(): Promise<void> {
+    // Create tables if they don't exist
+    await this.ctx.storage.sql.exec(`
+      CREATE TABLE IF NOT EXISTS game_state (
+        id INTEGER PRIMARY KEY,
+        phase TEXT NOT NULL,
+        game_pin TEXT NOT NULL,
+        quiz TEXT,
+        current_question_index INTEGER NOT NULL,
+        question_start_time INTEGER,
+        host_connected INTEGER NOT NULL,
+        timer_paused INTEGER NOT NULL,
+        paused_at_seconds_left INTEGER
+      )
+    `);
+    
+    await this.ctx.storage.sql.exec(`
+      CREATE TABLE IF NOT EXISTS players (
+        id TEXT PRIMARY KEY,
+        nickname TEXT NOT NULL,
+        score INTEGER NOT NULL DEFAULT 0,
+        answers TEXT NOT NULL DEFAULT '{}',
+        connected INTEGER NOT NULL DEFAULT 1
+      )
+    `);
+    
+    // Create indexes for better performance
+    await this.ctx.storage.sql.exec(`
+      CREATE INDEX IF NOT EXISTS idx_players_score ON players(score DESC)
+    `);
+  }
+
+  private async loadState(): Promise<GameState | null> {
+    // Try to load from SQL first
+    const cursor = await this.ctx.storage.sql.exec(`
+      SELECT * FROM game_state WHERE id = 1
+    `);
+    
+    const rows = [...cursor];
+    if (rows.length > 0) {
+      const row = rows[0] as any;
+      
+      // Load players from SQL
+      const playersCursor = await this.ctx.storage.sql.exec(`
+        SELECT * FROM players
+      `);
+      
+      const players: Record<string, Player> = {};
+      for (const playerRow of playersCursor) {
+        const p = playerRow as any;
+        players[p.id] = {
+          id: p.id,
+          nickname: p.nickname,
+          score: p.score,
+          answers: JSON.parse(p.answers),
+          connected: p.connected === 1,
+        };
+      }
+      
+      return {
+        phase: row.phase as 'lobby' | 'question' | 'leaderboard' | 'podium' | 'finished',
+        gamePin: row.game_pin,
+        quiz: row.quiz ? JSON.parse(row.quiz) : null,
+        players,
+        currentQuestionIndex: row.current_question_index,
+        questionStartTime: row.question_start_time,
+        hostConnected: row.host_connected === 1,
+        timerPaused: row.timer_paused === 1,
+        pausedAtSecondsLeft: row.paused_at_seconds_left,
+      };
+    }
+    
+    // Fallback: try old storage API for migration
+    const oldState = await this.ctx.storage.get<GameState>('gameState');
+    if (oldState) {
+      // Migrate to SQL
+      await this.migrateToSQL(oldState);
+      // Delete old storage
+      await this.ctx.storage.delete('gameState');
+      return oldState;
+    }
+    
+    return null;
+  }
+
+  private async migrateToSQL(state: GameState): Promise<void> {
+    // Insert game state
+    await this.ctx.storage.sql.exec(
+      `INSERT OR REPLACE INTO game_state 
+       (id, phase, game_pin, quiz, current_question_index, question_start_time, 
+        host_connected, timer_paused, paused_at_seconds_left)
+       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      state.phase,
+      state.gamePin,
+      state.quiz ? JSON.stringify(state.quiz) : null,
+      state.currentQuestionIndex,
+      state.questionStartTime,
+      state.hostConnected ? 1 : 0,
+      state.timerPaused ? 1 : 0,
+      state.pausedAtSecondsLeft
+    );
+    
+    // Insert players
+    for (const player of Object.values(state.players)) {
+      await this.ctx.storage.sql.exec(
+        `INSERT OR REPLACE INTO players (id, nickname, score, answers, connected)
+         VALUES (?, ?, ?, ?, ?)`,
+        player.id,
+        player.nickname,
+        player.score,
+        JSON.stringify(player.answers),
+        player.connected ? 1 : 0
+      );
+    }
+  }
+
   private async saveState(): Promise<void> {
-    await this.ctx.storage.put('gameState', this.state);
+    // Save to SQL instead of KV storage
+    await this.ctx.storage.sql.exec(
+      `INSERT OR REPLACE INTO game_state 
+       (id, phase, game_pin, quiz, current_question_index, question_start_time, 
+        host_connected, timer_paused, paused_at_seconds_left)
+       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      this.state.phase,
+      this.state.gamePin,
+      this.state.quiz ? JSON.stringify(this.state.quiz) : null,
+      this.state.currentQuestionIndex,
+      this.state.questionStartTime,
+      this.state.hostConnected ? 1 : 0,
+      this.state.timerPaused ? 1 : 0,
+      this.state.pausedAtSecondsLeft
+    );
+    
+    // Save all players
+    for (const player of Object.values(this.state.players)) {
+      await this.ctx.storage.sql.exec(
+        `INSERT OR REPLACE INTO players (id, nickname, score, answers, connected)
+         VALUES (?, ?, ?, ?, ?)`,
+        player.id,
+        player.nickname,
+        player.score,
+        JSON.stringify(player.answers),
+        player.connected ? 1 : 0
+      );
+    }
   }
 
   private generatePin(): string {
