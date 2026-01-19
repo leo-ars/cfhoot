@@ -24,6 +24,12 @@ export interface UIState {
   leaderboard: LeaderboardEntry[];
   lastCorrectIndices: number[];
   
+  // Answer distribution (for reveal screen)
+  answerDistribution: number[];
+  lastQuestionText: string;
+  lastQuestionAnswers: [string, string, string, string] | null;
+  showingAnswerReveal: boolean;
+  
   // Podium
   podiumRevealed: (LeaderboardEntry | null)[];
   
@@ -50,6 +56,10 @@ const initialState: UIState = {
   selectedAnswers: [],
   leaderboard: [],
   lastCorrectIndices: [],
+  answerDistribution: [],
+  lastQuestionText: '',
+  lastQuestionAnswers: null,
+  showingAnswerReveal: false,
   podiumRevealed: [null, null, null],
   isPaused: false,
   pauseReason: null,
@@ -151,6 +161,10 @@ export function handleServerMessage(message: ServerMessage) {
         ...state,
         lastCorrectIndices: message.correctIndices,
         leaderboard: message.scores,
+        answerDistribution: message.answerDistribution,
+        lastQuestionText: message.questionText,
+        lastQuestionAnswers: message.answers,
+        showingAnswerReveal: true,
       }));
       break;
       
@@ -158,6 +172,7 @@ export function handleServerMessage(message: ServerMessage) {
       gameStore.setState((state) => ({
         ...state,
         leaderboard: message.leaderboard,
+        showingAnswerReveal: false,
         gameState: state.gameState ? { ...state.gameState, phase: 'leaderboard' } : null,
       }));
       break;

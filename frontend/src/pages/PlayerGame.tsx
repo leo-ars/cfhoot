@@ -37,7 +37,7 @@ export function PlayerGame() {
   const { send } = useWebSocket(gameId, false);
   
   const state = useStore(gameStore);
-  const { gameState, currentQuestion, secondsLeft, hasAnswered, selectedAnswers, lastCorrectIndices, leaderboard, error, connected, reconnecting, isPaused, pauseReason } = state;
+  const { gameState, currentQuestion, secondsLeft, hasAnswered, selectedAnswers, lastCorrectIndices, leaderboard, error, connected, reconnecting, isPaused, pauseReason, showingAnswerReveal, answerDistribution, lastQuestionText, lastQuestionAnswers } = state;
   
   const [nickname, setNickname] = useState('');
   const [joined, setJoined] = useState(false);
@@ -297,6 +297,78 @@ export function PlayerGame() {
           </div>
           <h2 className="text-2xl font-bold text-white mb-2">Answer submitted!</h2>
           <p className="text-gray-400">Waiting for time to run out...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Answer reveal screen (shown after question ends)
+  if (showingAnswerReveal && lastQuestionAnswers) {
+    const wasCorrect = 
+      selectedAnswers.length === lastCorrectIndices.length &&
+      selectedAnswers.every(a => lastCorrectIndices.includes(a));
+    const answerColors = ['bg-answer-red', 'bg-answer-blue', 'bg-answer-yellow', 'bg-answer-green'];
+    const maxCount = Math.max(...answerDistribution, 1);
+    
+    return (
+      <div className="min-h-screen flex flex-col p-4">
+        {/* Result indicator at top */}
+        <div className="text-center mb-6">
+          {wasCorrect ? (
+            <div className="inline-flex items-center gap-2 bg-green-500/20 px-6 py-3 rounded-full animate-bounce-in">
+              <CheckCircle className="w-8 h-8 text-green-500" />
+              <span className="text-2xl font-bold text-green-500">Correct!</span>
+            </div>
+          ) : (
+            <div className="inline-flex items-center gap-2 bg-red-500/20 px-6 py-3 rounded-full animate-bounce-in">
+              <XCircle className="w-8 h-8 text-red-500" />
+              <span className="text-2xl font-bold text-red-500">Wrong!</span>
+            </div>
+          )}
+        </div>
+
+        {/* Answer distribution */}
+        <div className="flex-1 grid grid-cols-2 gap-3">
+          {lastQuestionAnswers.map((answer, index) => {
+            const count = answerDistribution[index] || 0;
+            const percentage = maxCount > 0 ? (count / maxCount) * 100 : 0;
+            const isCorrect = lastCorrectIndices.includes(index);
+            const wasSelected = selectedAnswers.includes(index);
+            
+            return (
+              <div key={index} className="relative flex flex-col">
+                <div className={`${answerColors[index]} rounded-xl p-4 text-white relative overflow-hidden flex-1 ${isCorrect ? 'ring-4 ring-green-400' : ''} ${wasSelected ? 'ring-2 ring-white' : ''}`}>
+                  {/* Background bar */}
+                  <div 
+                    className="absolute inset-0 bg-white/20 transition-all duration-1000 ease-out"
+                    style={{ width: `${percentage}%` }}
+                  />
+                  
+                  {/* Content */}
+                  <div className="relative z-10 flex flex-col h-full">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold opacity-75">#{index + 1}</span>
+                      <div className="flex gap-1">
+                        {isCorrect && <span className="text-xl">✓</span>}
+                        {wasSelected && <span className="text-lg opacity-75">👆</span>}
+                      </div>
+                    </div>
+                    <p className="text-sm font-bold mb-auto line-clamp-3">{answer}</p>
+                    <div className="flex items-baseline gap-1 mt-2">
+                      <span className="text-2xl font-extrabold">{count}</span>
+                      <span className="text-xs opacity-75">
+                        {count === 1 ? 'player' : 'players'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="text-center mt-4">
+          <p className="text-gray-400 text-sm">Results coming up...</p>
         </div>
       </div>
     );

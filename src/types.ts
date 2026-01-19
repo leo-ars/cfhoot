@@ -67,7 +67,7 @@ export type ServerMessage =
   | { type: 'question_start'; question: QuestionForPlayer; questionIndex: number; totalQuestions: number }
   | { type: 'timer_tick'; secondsLeft: number }
   | { type: 'answer_received'; playerId: string }
-  | { type: 'question_end'; correctIndices: number[]; scores: LeaderboardEntry[] }
+  | { type: 'question_end'; correctIndices: number[]; scores: LeaderboardEntry[]; answerDistribution: number[]; questionText: string; answers: [string, string, string, string] }
   | { type: 'leaderboard_update'; leaderboard: LeaderboardEntry[] }
   | { type: 'podium_reveal'; position: 1 | 2 | 3; player: LeaderboardEntry | null }
   | { type: 'game_finished'; finalLeaderboard: LeaderboardEntry[] }

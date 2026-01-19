@@ -637,7 +637,29 @@ export class GameDurableObject extends DurableObject<Env> {
 
     await this.saveState(); // Persist scores after question
     const scores = this.calculateLeaderboard();
-    this.broadcast({ type: 'question_end', correctIndices: question.correctIndices, scores });
+    
+    // Calculate answer distribution (how many players chose each answer)
+    const answerDistribution = [0, 0, 0, 0];
+    for (const player of Object.values(this.state.players)) {
+      const answer = player.answers[question.id];
+      if (answer) {
+        // Count each selected answer index
+        for (const answerIndex of answer.answerIndices) {
+          if (answerIndex >= 0 && answerIndex < 4) {
+            answerDistribution[answerIndex]++;
+          }
+        }
+      }
+    }
+    
+    this.broadcast({ 
+      type: 'question_end', 
+      correctIndices: question.correctIndices, 
+      scores,
+      answerDistribution,
+      questionText: question.text,
+      answers: question.answers
+    });
 
     // Reset the flag - question has ended
     this.questionEnding = false;

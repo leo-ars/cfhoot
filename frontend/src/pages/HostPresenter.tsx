@@ -12,7 +12,7 @@ export function HostPresenter() {
   const { send } = useWebSocket(gameId, true);
   
   const state = useStore(gameStore);
-  const { gameState, currentQuestion, questionIndex, totalQuestions, secondsLeft, leaderboard, podiumRevealed, reconnecting, isPaused, pauseReason } = state;
+  const { gameState, currentQuestion, questionIndex, totalQuestions, secondsLeft, leaderboard, podiumRevealed, reconnecting, isPaused, pauseReason, showingAnswerReveal, answerDistribution, lastQuestionText, lastQuestionAnswers, lastCorrectIndices } = state;
   
   // Count only connected players
   const connectedPlayers = gameState ? Object.values(gameState.players).filter(p => p.connected) : [];
@@ -163,6 +163,56 @@ export function HostPresenter() {
             </div>
           ))}
         </div>
+      </div>
+    );
+  }
+
+  // Answer reveal screen (shown after question ends)
+  if (showingAnswerReveal && lastQuestionAnswers) {
+    const answerColors = ['bg-answer-red', 'bg-answer-blue', 'bg-answer-yellow', 'bg-answer-green'];
+    const maxCount = Math.max(...answerDistribution, 1);
+    
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-4">
+        <h2 className="text-3xl font-bold text-white mb-2">Answer Distribution</h2>
+        <p className="text-gray-400 mb-8 text-center max-w-2xl">{lastQuestionText}</p>
+
+        <div className="grid grid-cols-2 gap-4 w-full max-w-4xl mb-8">
+          {lastQuestionAnswers.map((answer, index) => {
+            const count = answerDistribution[index] || 0;
+            const percentage = maxCount > 0 ? (count / maxCount) * 100 : 0;
+            const isCorrect = lastCorrectIndices.includes(index);
+            
+            return (
+              <div key={index} className="relative">
+                <div className={`${answerColors[index]} rounded-xl p-6 text-white relative overflow-hidden ${isCorrect ? 'ring-4 ring-green-400' : ''}`}>
+                  {/* Background bar showing percentage */}
+                  <div 
+                    className="absolute inset-0 bg-white/20 transition-all duration-1000 ease-out"
+                    style={{ width: `${percentage}%` }}
+                  />
+                  
+                  {/* Content */}
+                  <div className="relative z-10">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-bold opacity-75">Answer {index + 1}</span>
+                      {isCorrect && <span className="text-2xl">✓</span>}
+                    </div>
+                    <p className="text-lg font-bold mb-2">{answer}</p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-3xl font-extrabold">{count}</span>
+                      <span className="text-sm opacity-75">
+                        {count === 1 ? 'player' : 'players'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <p className="text-gray-400 text-sm">Leaderboard will appear automatically...</p>
       </div>
     );
   }
