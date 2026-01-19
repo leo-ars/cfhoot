@@ -2,9 +2,6 @@ import type { CreateGameResponse, JoinGameResponse, SavedQuiz, Quiz } from './ty
 
 export { GameDurableObject } from './game';
 
-// PIN prefix for KV storage
-const PIN_PREFIX = 'pin:';
-
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -59,16 +56,23 @@ async function handleApiRoute(url: URL, request: Request, env: Env): Promise<Res
     const { gamePin } = (await pinResponse.json()) as { gamePin: string };
 
     // Check for PIN collision (rare but possible)
-    const existingGameId = await env.QUIZZES.get(`${PIN_PREFIX}${gamePin}`);
-    if (existingGameId) {
+    const existing = await env.DB.prepare('SELECT game_id FROM game_pins WHERE pin = ?')
+      .bind(gamePin)
+      .first();
+    
+    if (existing) {
       // Collision detected - this is extremely rare but handle it
       console.warn(`PIN collision detected: ${gamePin} already exists`);
       // Return error and let client retry
       return Response.json({ error: 'PIN collision, please try again' }, { status: 409 });
     }
 
-    // Store PIN mapping in KV (expires in 24 hours)
-    await env.QUIZZES.put(`${PIN_PREFIX}${gamePin}`, gameId, { expirationTtl: 86400 });
+    // Store PIN mapping in database (expires in 24 hours)
+    const now = Date.now();
+    const expiresAt = now + (24 * 60 * 60 * 1000); // 24 hours
+    await env.DB.prepare('INSERT INTO game_pins (pin, game_id, created_at, expires_at) VALUES (?, ?, ?, ?)')
+      .bind(gamePin, gameId, now, expiresAt)
+      .run();
 
     const response: CreateGameResponse = { gameId, gamePin };
     return Response.json(response, { status: 201 });
@@ -85,44 +89,59 @@ async function handleApiRoute(url: URL, request: Request, env: Env): Promise<Res
   // POST /api/join - Join game by PIN
   if (url.pathname === '/api/join' && request.method === 'POST') {
     const body = (await request.json()) as { pin: string };
-    const gameId = await env.QUIZZES.get(`${PIN_PREFIX}${body.pin}`);
+    
+    // Clean up expired PINs first
+    await env.DB.prepare('DELETE FROM game_pins WHERE expires_at < ?')
+      .bind(Date.now())
+      .run();
+    
+    const result = await env.DB.prepare('SELECT game_id FROM game_pins WHERE pin = ?')
+      .bind(body.pin)
+      .first<{ game_id: string }>();
 
-    if (!gameId) {
+    if (!result) {
       return Response.json({ success: false, error: 'Invalid PIN' }, { status: 404 });
     }
 
-    const response: JoinGameResponse = { gameId, success: true };
+    const response: JoinGameResponse = { gameId: result.game_id, success: true };
     return Response.json(response);
   }
 
   // GET /api/join/:pin - Join game by PIN (GET version)
   if (url.pathname.match(/^\/api\/join\/[^/]+$/) && request.method === 'GET') {
     const pin = url.pathname.split('/')[3];
-    const gameId = await env.QUIZZES.get(`${PIN_PREFIX}${pin}`);
+    
+    // Clean up expired PINs first
+    await env.DB.prepare('DELETE FROM game_pins WHERE expires_at < ?')
+      .bind(Date.now())
+      .run();
+    
+    const result = await env.DB.prepare('SELECT game_id FROM game_pins WHERE pin = ?')
+      .bind(pin)
+      .first<{ game_id: string }>();
 
-    if (!gameId) {
+    if (!result) {
       return Response.json({ success: false, error: 'Invalid PIN' }, { status: 404 });
     }
 
-    const response: JoinGameResponse = { gameId, success: true };
+    const response: JoinGameResponse = { gameId: result.game_id, success: true };
     return Response.json(response);
   }
 
   // GET /api/quizzes - List all saved quizzes
   if (url.pathname === '/api/quizzes' && request.method === 'GET') {
-    const list = await env.QUIZZES.list();
-    const quizzes: SavedQuiz[] = [];
+    const { results } = await env.DB.prepare(
+      'SELECT id, title, questions, created_at, updated_at FROM quizzes ORDER BY updated_at DESC'
+    ).all<{ id: string; title: string; questions: string; created_at: number; updated_at: number }>();
     
-    for (const key of list.keys) {
-      // Skip PIN mappings
-      if (key.name.startsWith(PIN_PREFIX)) continue;
-      
-      const quiz = await env.QUIZZES.get<SavedQuiz>(key.name, 'json');
-      if (quiz) quizzes.push(quiz);
-    }
+    const quizzes: SavedQuiz[] = results.map(row => ({
+      id: row.id,
+      title: row.title,
+      questions: JSON.parse(row.questions),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
     
-    // Sort by updatedAt descending
-    quizzes.sort((a, b) => b.updatedAt - a.updatedAt);
     return Response.json(quizzes);
   }
 
@@ -130,55 +149,94 @@ async function handleApiRoute(url: URL, request: Request, env: Env): Promise<Res
   if (url.pathname === '/api/quizzes' && request.method === 'POST') {
     const quiz = (await request.json()) as Quiz;
     const now = Date.now();
+    const quizId = quiz.id || crypto.randomUUID();
     
     const savedQuiz: SavedQuiz = {
       ...quiz,
-      id: quiz.id || crypto.randomUUID(),
+      id: quizId,
       createdAt: now,
       updatedAt: now,
     };
     
-    await env.QUIZZES.put(savedQuiz.id, JSON.stringify(savedQuiz));
+    await env.DB.prepare(
+      'INSERT INTO quizzes (id, title, questions, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
+    )
+      .bind(quizId, quiz.title, JSON.stringify(quiz.questions), now, now)
+      .run();
+    
     return Response.json(savedQuiz, { status: 201 });
   }
 
   // GET /api/quizzes/:id - Get a saved quiz
   if (url.pathname.match(/^\/api\/quizzes\/[^/]+$/) && request.method === 'GET') {
     const quizId = url.pathname.split('/')[3];
-    const quiz = await env.QUIZZES.get<SavedQuiz>(quizId, 'json');
+    const result = await env.DB.prepare(
+      'SELECT id, title, questions, created_at, updated_at FROM quizzes WHERE id = ?'
+    )
+      .bind(quizId)
+      .first<{ id: string; title: string; questions: string; created_at: number; updated_at: number }>();
     
-    if (!quiz) {
+    if (!result) {
       return Response.json({ error: 'Quiz not found' }, { status: 404 });
     }
+    
+    const quiz: SavedQuiz = {
+      id: result.id,
+      title: result.title,
+      questions: JSON.parse(result.questions),
+      createdAt: result.created_at,
+      updatedAt: result.updated_at,
+    };
+    
     return Response.json(quiz);
   }
 
   // PUT /api/quizzes/:id - Update a saved quiz
   if (url.pathname.match(/^\/api\/quizzes\/[^/]+$/) && request.method === 'PUT') {
     const quizId = url.pathname.split('/')[3];
-    const existing = await env.QUIZZES.get<SavedQuiz>(quizId, 'json');
+    
+    // Check if quiz exists
+    const existing = await env.DB.prepare('SELECT created_at FROM quizzes WHERE id = ?')
+      .bind(quizId)
+      .first<{ created_at: number }>();
     
     if (!existing) {
       return Response.json({ error: 'Quiz not found' }, { status: 404 });
     }
     
     const updates = (await request.json()) as Partial<Quiz>;
+    const updatedAt = Date.now();
+    
+    await env.DB.prepare(
+      'UPDATE quizzes SET title = ?, questions = ?, updated_at = ? WHERE id = ?'
+    )
+      .bind(updates.title || '', JSON.stringify(updates.questions || []), updatedAt, quizId)
+      .run();
+    
+    // Fetch updated quiz
+    const result = await env.DB.prepare(
+      'SELECT id, title, questions, created_at, updated_at FROM quizzes WHERE id = ?'
+    )
+      .bind(quizId)
+      .first<{ id: string; title: string; questions: string; created_at: number; updated_at: number }>();
+    
     const savedQuiz: SavedQuiz = {
-      ...existing,
-      ...updates,
-      id: quizId,
-      createdAt: existing.createdAt,
-      updatedAt: Date.now(),
+      id: result!.id,
+      title: result!.title,
+      questions: JSON.parse(result!.questions),
+      createdAt: result!.created_at,
+      updatedAt: result!.updated_at,
     };
     
-    await env.QUIZZES.put(quizId, JSON.stringify(savedQuiz));
     return Response.json(savedQuiz);
   }
 
   // DELETE /api/quizzes/:id - Delete a saved quiz
   if (url.pathname.match(/^\/api\/quizzes\/[^/]+$/) && request.method === 'DELETE') {
     const quizId = url.pathname.split('/')[3];
-    await env.QUIZZES.delete(quizId);
+    await env.DB.prepare('DELETE FROM quizzes WHERE id = ?')
+      .bind(quizId)
+      .run();
     return Response.json({ success: true });
   }
 

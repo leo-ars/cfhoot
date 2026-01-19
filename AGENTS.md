@@ -6,7 +6,7 @@ This document provides coding agents with essential information about the CFHoot
 
 CFHoot is a Kahoot-style real-time quiz game built on Cloudflare Workers with:
 - **Backend**: Cloudflare Workers + Durable Objects (WebSocket-based real-time game logic)
-- **Storage**: Cloudflare KV (quiz persistence) + R2 (image storage)
+- **Storage**: Cloudflare D1 (SQLite database for quizzes & game PINs) + R2 (image storage)
 - **Frontend**: React + TanStack Router + TanStack Store + TailwindCSS
 - **Testing**: Vitest with `@cloudflare/vitest-pool-workers`
 
@@ -121,7 +121,7 @@ import { useEffect, useCallback } from 'react';
 - **Types**: `PascalCase` (e.g., `type ClientMessage`)
 
 ### Cloudflare Bindings
-- All caps: `GAME` (Durable Object), `QUIZZES` (KV), `IMAGES` (R2)
+- All caps: `GAME` (Durable Object), `DB` (D1 Database), `IMAGES` (R2)
 
 ## Type System
 

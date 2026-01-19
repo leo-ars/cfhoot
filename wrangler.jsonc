@@ -25,10 +25,11 @@
 			"new_classes": ["GameDurableObject"]
 		}
 	],
-	"kv_namespaces": [
+	"d1_databases": [
 		{
-			"binding": "QUIZZES",
-			"id": "00000000000000000000000000000000"
+			"binding": "DB",
+			"database_name": "cfhoot-db",
+			"database_id": "b90c603b-e98e-4260-9be2-73c270328c70"
 		}
 	],
 	"r2_buckets": [
