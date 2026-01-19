@@ -51,27 +51,20 @@ async function handleApiRoute(url: URL, request: Request, env: Env): Promise<Res
   // POST /api/games - Create a new game
   if (url.pathname === '/api/games' && request.method === 'POST') {
     const gameId = crypto.randomUUID();
-    
-    // Generate unique PIN with collision detection
-    let gamePin: string | null = null;
-    let attempts = 0;
-    const maxAttempts = 10;
-    
-    while (attempts < maxAttempts) {
-      const pin = Math.floor(100000 + Math.random() * 900000).toString();
-      
-      // Check if PIN already exists in KV
-      const existingGameId = await env.QUIZZES.get(`${PIN_PREFIX}${pin}`);
-      if (!existingGameId) {
-        gamePin = pin;
-        break;
-      }
-      
-      attempts++;
-    }
-    
-    if (!gamePin) {
-      return Response.json({ error: 'Failed to generate unique PIN after 10 attempts' }, { status: 500 });
+    const id = env.GAME.idFromName(gameId);
+    const stub = env.GAME.get(id);
+
+    // Get the game PIN from the Durable Object
+    const pinResponse = await stub.fetch(new Request('https://internal/pin'));
+    const { gamePin } = (await pinResponse.json()) as { gamePin: string };
+
+    // Check for PIN collision (rare but possible)
+    const existingGameId = await env.QUIZZES.get(`${PIN_PREFIX}${gamePin}`);
+    if (existingGameId) {
+      // Collision detected - this is extremely rare but handle it
+      console.warn(`PIN collision detected: ${gamePin} already exists`);
+      // Return error and let client retry
+      return Response.json({ error: 'PIN collision, please try again' }, { status: 409 });
     }
 
     // Store PIN mapping in KV (expires in 24 hours)
