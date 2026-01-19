@@ -39,6 +39,8 @@ export interface GameState {
   currentQuestionIndex: number;
   questionStartTime: number | null;
   hostConnected: boolean;
+  timerPaused: boolean;
+  pausedAtSecondsLeft: number | null;
 }
 
 // ============== WebSocket Message Types ==============
@@ -68,7 +70,9 @@ export type ServerMessage =
   | { type: 'question_end'; correctIndices: number[]; scores: LeaderboardEntry[] }
   | { type: 'leaderboard_update'; leaderboard: LeaderboardEntry[] }
   | { type: 'podium_reveal'; position: 1 | 2 | 3; player: LeaderboardEntry | null }
-  | { type: 'game_finished'; finalLeaderboard: LeaderboardEntry[] };
+  | { type: 'game_finished'; finalLeaderboard: LeaderboardEntry[] }
+  | { type: 'game_paused'; reason: string }
+  | { type: 'game_resumed' };
 
 // Question without correct answer (sent to players and host)
 export interface QuestionForPlayer {

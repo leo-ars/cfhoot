@@ -24,7 +24,12 @@ function getStoredSession(gameId: string): PlayerSession | null {
 }
 
 function storeSession(gameId: string, session: PlayerSession): void {
-  localStorage.setItem(`cfhoot_session_${gameId}`, JSON.stringify(session));
+  try {
+    localStorage.setItem(`cfhoot_session_${gameId}`, JSON.stringify(session));
+  } catch (error) {
+    console.warn('Failed to store session in localStorage:', error);
+    // Silently fail - not critical for gameplay
+  }
 }
 
 export function PlayerGame() {
@@ -32,7 +37,7 @@ export function PlayerGame() {
   const { send } = useWebSocket(gameId, false);
   
   const state = useStore(gameStore);
-  const { gameState, currentQuestion, secondsLeft, hasAnswered, selectedAnswers, lastCorrectIndices, leaderboard, error, connected, reconnecting } = state;
+  const { gameState, currentQuestion, secondsLeft, hasAnswered, selectedAnswers, lastCorrectIndices, leaderboard, error, connected, reconnecting, isPaused, pauseReason } = state;
   
   const [nickname, setNickname] = useState('');
   const [joined, setJoined] = useState(false);
@@ -141,6 +146,24 @@ export function PlayerGame() {
       <div className="min-h-screen flex flex-col items-center justify-center p-4">
         <Loader2 className="w-12 h-12 text-brand-orange animate-spin mb-4" />
         <p className="text-white text-xl">Reconnecting...</p>
+      </div>
+    );
+  }
+
+  // Game paused overlay
+  if (isPaused && joined) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-4">
+        <div className="card max-w-md text-center">
+          <div className="w-16 h-16 rounded-full bg-yellow-500/30 flex items-center justify-center mx-auto mb-4">
+            <div className="w-12 h-12 border-4 border-yellow-500 rounded-full"></div>
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-2">Game Paused</h2>
+          <p className="text-gray-300">{pauseReason || 'Waiting to resume...'}</p>
+          <div className="mt-4 animate-pulse">
+            <div className="w-12 h-12 border-4 border-brand-orange border-t-transparent rounded-full animate-spin mx-auto"></div>
+          </div>
+        </div>
       </div>
     );
   }

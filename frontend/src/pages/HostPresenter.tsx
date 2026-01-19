@@ -12,7 +12,7 @@ export function HostPresenter() {
   const { send } = useWebSocket(gameId, true);
   
   const state = useStore(gameStore);
-  const { gameState, currentQuestion, questionIndex, totalQuestions, secondsLeft, leaderboard, podiumRevealed, reconnecting } = state;
+  const { gameState, currentQuestion, questionIndex, totalQuestions, secondsLeft, leaderboard, podiumRevealed, reconnecting, isPaused, pauseReason } = state;
   
   // Count only connected players
   const connectedPlayers = gameState ? Object.values(gameState.players).filter(p => p.connected) : [];
@@ -113,6 +113,13 @@ export function HostPresenter() {
             {secondsLeft}
           </div>
         </div>
+
+        {/* Pause indicator */}
+        {isPaused && (
+          <div className="mb-4 p-4 bg-yellow-500/20 border-2 border-yellow-500 rounded-xl text-center animate-pulse">
+            <p className="text-yellow-300 font-bold text-lg">⏸️ Game Paused - {pauseReason || 'Waiting to resume...'}</p>
+          </div>
+        )}
 
         <div className="flex gap-2 justify-center mb-4">
           {currentQuestion.doublePoints && (

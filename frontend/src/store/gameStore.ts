@@ -27,6 +27,10 @@ export interface UIState {
   // Podium
   podiumRevealed: (LeaderboardEntry | null)[];
   
+  // Game pause state
+  isPaused: boolean;
+  pauseReason: string | null;
+  
   // Errors
   error: string | null;
 }
@@ -47,6 +51,8 @@ const initialState: UIState = {
   leaderboard: [],
   lastCorrectIndices: [],
   podiumRevealed: [null, null, null],
+  isPaused: false,
+  pauseReason: null,
   error: null,
 };
 
@@ -173,6 +179,22 @@ export function handleServerMessage(message: ServerMessage) {
         ...state,
         leaderboard: message.finalLeaderboard,
         gameState: state.gameState ? { ...state.gameState, phase: 'finished' } : null,
+      }));
+      break;
+      
+    case 'game_paused':
+      gameStore.setState((state) => ({
+        ...state,
+        isPaused: true,
+        pauseReason: message.reason,
+      }));
+      break;
+      
+    case 'game_resumed':
+      gameStore.setState((state) => ({
+        ...state,
+        isPaused: false,
+        pauseReason: null,
       }));
       break;
   }
